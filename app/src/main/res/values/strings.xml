@@ -1,0 +1,18 @@
+<resources>
+    <string name="app_name">GUET_Map</string>
+    <string name="search_hint">搜索地点、建筑...</string>
+    <string name="sheet_title">附近地点</string>
+    <string name="tab_map">地图</string>
+    <string name="tab_explore">探索</string>
+    <string name="tab_favorites">收藏</string>
+    <string name="tab_contribute">添加</string>
+    <string name="tab_notifications">通知</string>
+    <string name="filter_canteen">食堂</string>
+    <string name="filter_classroom">教室</string>
+    <string name="filter_cafe">咖啡</string>
+    <string name="filter_library">图书馆</string>
+    <string name="filter_dorm">宿舍</string>
+    <string name="filter_gate">校门</string>
+    <string name="filter_store">商店</string>
+    <string name="filter_sports">运动场</string>
+</resources>

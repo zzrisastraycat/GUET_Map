@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<navigation xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/nav_graph"
+    app:startDestination="@id/nav_map">
+
+    <fragment
+        android:id="@+id/nav_map"
+        android:name="com.example.guet_map.ui.map.MapFragment"
+        android:label="地图" />
+
+    <fragment
+        android:id="@+id/nav_explore"
+        android:name="com.example.guet_map.ui.explore.ExploreFragment"
+        android:label="探索" />
+
+    <fragment
+        android:id="@+id/nav_favorites"
+        android:name="com.example.guet_map.ui.favorites.FavoritesFragment"
+        android:label="收藏" />
+
+    <fragment
+        android:id="@+id/nav_contribute"
+        android:name="com.example.guet_map.ui.contribute.ContributeFragment"
+        android:label="添加" />
+
+    <fragment
+        android:id="@+id/nav_notifications"
+        android:name="com.example.guet_map.ui.notifications.NotificationsFragment"
+        android:label="通知" />
+
+</navigation>

@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:paddingStart="4dp"
+    android:paddingEnd="12dp"
+    android:paddingBottom="8dp">
+
+    <!-- === 左侧：序号 + 竖线 === -->
+
+    <!-- 竖线 (从圆圈底部延伸到底部) -->
+    <View
+        android:id="@+id/vLine"
+        android:layout_width="2dp"
+        android:layout_height="0dp"
+        android:background="@color/step_line"
+        app:layout_constraintStart_toStartOf="@id/tvStepNumber"
+        app:layout_constraintEnd_toEndOf="@id/tvStepNumber"
+        app:layout_constraintTop_toBottomOf="@id/tvStepNumber"
+        app:layout_constraintBottom_toBottomOf="parent" />
+
+    <!-- 圆形序号 -->
+    <TextView
+        android:id="@+id/tvStepNumber"
+        android:layout_width="28dp"
+        android:layout_height="28dp"
+        android:background="@drawable/bg_step_circle"
+        android:gravity="center"
+        android:textColor="@color/white"
+        android:textSize="12sp"
+        android:textStyle="bold"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent"
+        tools:text="01" />
+
+    <!-- === 右侧：描述 + 图片 === -->
+
+    <LinearLayout
+        android:id="@+id/llContent"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:layout_marginStart="16dp"
+        app:layout_constraintStart_toEndOf="@id/tvStepNumber"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintTop_toTopOf="parent">
+
+        <TextView
+            android:id="@+id/tvDescription"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="?attr/colorOnSurface"
+            android:textSize="14sp"
+            android:lineSpacingExtra="2dp"
+            tools:text="从南门进入校园，沿主干道直行约200米" />
+
+        <ImageView
+            android:id="@+id/ivStepPhoto"
+            android:layout_width="match_parent"
+            android:layout_height="160dp"
+            android:layout_marginTop="8dp"
+            android:scaleType="centerCrop"
+            android:background="@drawable/bg_image_placeholder"
+            android:contentDescription="实景照片"
+            tools:src="@android:drawable/ic_menu_gallery" />
+
+    </LinearLayout>
+
+</androidx.constraintlayout.widget.ConstraintLayout>

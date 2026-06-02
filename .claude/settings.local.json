@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(./gradlew --version)",
+      "Bash(where java *)",
+      "Read(//c/Program Files/**)",
+      "Read(//c/Program Files/Android/Android Studio/jbr/**)",
+      "Bash(export JAVA_HOME=\"/c/Program Files/Android/Android Studio/jbr\")",
+      "Bash(./gradlew assembleDebug --no-daemon)",
+      "Bash(adb logcat *)",
+      "Bash(\"C:/Users/19892/AppData/Local/Android/Sdk/platform-tools/adb\" logcat *)",
+      "Bash(C:/Users/19892/AppData/Local/Android/Sdk/platform-tools/adb shell *)",
+      "Bash(bsdtar -tf \"C:/GUET_Map/app/build/outputs/apk/debug/app-debug.apk\")",
+      "Bash(unzip -l \"C:/GUET_Map/app/build/outputs/apk/debug/app-debug.apk\")",
+      "Bash(\"/c/Program Files/Android/Android Studio/jbr/bin/jar\" -tf \"C:/Users/19892/.gradle/caches/modules-2/files-2.1/com.amap.api/3dmap/10.0.600/83d7704f532fd79f54652241d26ab92c71014a2e/3dmap-10.0.600.jar\")",
+      "Bash(\"/c/Program Files/Android/Android Studio/jbr/bin/jar\" -tf \"C:/GUET_Map/app/build/intermediates/apk/debug/app-debug.apk\")",
+      "Bash(keytool -list -v -keystore __TRACKED_VAR__/.android/debug.keystore -alias androiddebugkey -storepass android)",
+      "Bash(keytool *)",
+      "Bash(/c/Program Files/Android/Android Studio/jbr/bin/keytool *)",
+      "Bash(./gradlew assembleDebug)",
+      "Bash(export JAVA_HOME=\"C:/Program Files/Android/Android Studio/jbr\")",
+      "Bash(gh auth *)"
+    ]
+  }
+}
