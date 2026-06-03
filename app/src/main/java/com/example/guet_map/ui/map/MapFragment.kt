@@ -32,10 +32,13 @@ import com.amap.api.maps.model.MarkerOptions
 import com.example.guet_map.R
 import com.example.guet_map.databinding.FragmentMapBinding
 import com.example.guet_map.databinding.LayoutNavigationPanelBinding
+import com.example.guet_map.databinding.LayoutLocationDetailBinding
 import com.example.guet_map.model.GuideStep
 import com.example.guet_map.model.Location
 import com.example.guet_map.model.Resource
-import com.example.guet_map.ui.map.RouteNavigator.RouteResult
+import com.example.guet_map.ui.map.RouteResult
+import coil.load
+import coil.transform.RoundedCornersTransformation
 import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import dagger.hilt.android.AndroidEntryPoint
@@ -73,6 +76,10 @@ class MapFragment : Fragment() {
     private var aMapSearchClient: AMapSearchClient? = null
     private var poiMarkers: MutableList<com.amap.api.maps.model.Marker> = mutableListOf()
 
+    // 路径规划相关
+    private var aMapRouteClient: AMapRouteClient? = null
+    private var currentRouteResult: RouteResult? = null
+
     // BottomSheet 内部视图缓存
     private var sheetTitle: TextView? = null
     private var sheetRating: TextView? = null
@@ -86,6 +93,10 @@ class MapFragment : Fragment() {
     private var tvRouteDuration: TextView? = null
     private var tvNextStep: TextView? = null
     private var cardNavigationPanel: CardView? = null
+
+    // 详情弹窗
+    private var locationDetailBinding: LayoutLocationDetailBinding? = null
+    private var cardLocationDetail: CardView? = null
 
     private val locationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -113,6 +124,7 @@ class MapFragment : Fragment() {
 
         setupBottomSheet()
         setupNavigationPanel()
+        setupLocationDetail()
         setupFilterTags()
         setupSearchBar()
         setupSearch()
@@ -140,6 +152,7 @@ class MapFragment : Fragment() {
         super.onDestroyView()
         aMapLocationClient?.destroy()
         aMapSearchClient?.destroy()
+        aMapRouteClient?.destroy()
         clearPoiMarkers()
         binding.mapView.onDestroy()
         routeNavigator?.destroy()
@@ -245,11 +258,11 @@ class MapFragment : Fragment() {
         val panelBinding = navigationPanelBinding ?: return
 
         // 获取路径信息
-        val distance = result.distance.toInt()
-        val duration = result.duration / 60
+        val distance = result.distanceInt
+        val duration = result.durationInt / 60
 
         // 更新面板显示
-        panelBinding.tvRouteDistance.text = distance.toString()
+        panelBinding.tvRouteDistance.text = result.distanceKm
         panelBinding.tvRouteDuration.text = duration.toString()
 
         // 显示导航提示
@@ -302,6 +315,9 @@ class MapFragment : Fragment() {
         map.setOnMarkerClickListener { marker ->
             val location = marker.`object` as? Location
             if (location != null) {
+                // 显示详情弹窗
+                showLocationDetailCard(location)
+                // 同时更新 ViewModel 的选择状态
                 viewModel.selectLocation(location)
             }
             false
@@ -568,6 +584,16 @@ class MapFragment : Fragment() {
      * 设置导航面板
      */
     private fun setupNavigationPanel() {
+        // 初始化路径规划客户端
+        aMapRouteClient = AMapRouteClient(requireContext()).apply {
+            onRouteResult = { result ->
+                onRouteResultReceived(result)
+            }
+            onRouteError = { error ->
+                Toast.makeText(requireContext(), error, Toast.LENGTH_SHORT).show()
+            }
+        }
+
         val navPanelView = layoutInflater.inflate(R.layout.layout_navigation_panel, null)
         navigationPanelBinding = LayoutNavigationPanelBinding.bind(navPanelView)
 
@@ -585,6 +611,101 @@ class MapFragment : Fragment() {
         // 将导航面板添加到地图容器
         val container = binding.root.findViewById<ViewGroup>(R.id.mapContainer)
         container?.addView(navPanelView)
+    }
+
+    /**
+     * 设置地点详情弹窗
+     */
+    private fun setupLocationDetail() {
+        val detailView = layoutInflater.inflate(R.layout.layout_location_detail, null)
+        locationDetailBinding = LayoutLocationDetailBinding.bind(detailView)
+        cardLocationDetail = locationDetailBinding?.cardLocationDetail
+
+        // 关闭按钮
+        locationDetailBinding?.btnCloseDetail?.setOnClickListener {
+            hideLocationDetail()
+        }
+
+        // 导航按钮
+        locationDetailBinding?.btnNavigate?.setOnClickListener {
+            hideLocationDetail()
+            startNavigation()
+        }
+
+        // 收藏按钮
+        locationDetailBinding?.btnFavorite?.setOnClickListener {
+            Toast.makeText(requireContext(), "已加入收藏", Toast.LENGTH_SHORT).show()
+        }
+
+        // 将详情弹窗添加到地图容器
+        val container = binding.root.findViewById<ViewGroup>(R.id.mapContainer)
+        container?.addView(detailView)
+    }
+
+    /**
+     * 显示地点详情弹窗
+     */
+    private fun showLocationDetailCard(location: Location) {
+        val binding = locationDetailBinding ?: return
+
+        // 填充数据
+        binding.tvLocationName.text = location.name
+        binding.tvCategory.text = location.category
+        binding.tvRating.text = String.format("%.1f", location.rating)
+        binding.tvAddress.text = if (location.address.isNotEmpty()) location.address else "暂无地址信息"
+        binding.tvOpeningHours.text = if (location.openingHours.isNotEmpty()) location.openingHours else "全天开放"
+        binding.tvDescription.text = if (location.description.isNotEmpty()) location.description else "暂无详细描述"
+
+        // 电话（如果有）
+        if (location.phone.isNotEmpty()) {
+            binding.llPhone.visibility = View.VISIBLE
+            binding.tvPhone.text = location.phone
+        } else {
+            binding.llPhone.visibility = View.GONE
+        }
+
+        // 加载图片
+        if (location.imageUrl.isNotEmpty()) {
+            binding.ivLocationImage.load(location.imageUrl) {
+                crossfade(true)
+                placeholder(R.drawable.ic_location_placeholder)
+                error(R.drawable.ic_location_placeholder)
+            }
+        } else {
+            binding.ivLocationImage.setImageResource(R.drawable.ic_location_placeholder)
+        }
+
+        // 显示弹窗
+        cardLocationDetail?.visibility = View.VISIBLE
+
+        // 收起 BottomSheet
+        bottomSheetBehavior.state = BottomSheetBehavior.STATE_COLLAPSED
+    }
+
+    /**
+     * 隐藏地点详情弹窗
+     */
+    private fun hideLocationDetail() {
+        cardLocationDetail?.visibility = View.GONE
+    }
+
+    private fun onRouteResultReceived(result: RouteResult) {
+        currentRouteResult = result
+
+        // 显示导航面板
+        cardNavigationPanel?.visibility = View.VISIBLE
+
+        // 更新距离和时间显示
+        tvRouteDistance?.text = result.distanceKm
+        tvRouteDuration?.text = (result.durationInt / 60).toString()
+
+        // 显示第一步指示
+        if (result.steps.isNotEmpty()) {
+            tvNextStep?.text = result.steps.first().instruction
+        }
+
+        // 在地图上绘制路径
+        routeNavigator?.drawRoute(result)
     }
 
     private fun configureActionButtons(root: View) {
@@ -621,11 +742,13 @@ class MapFragment : Fragment() {
         // 保存导航目标
         navigationTarget = target
 
-        // 开始路径搜索
-        val startLatLng = LatLng(currentLocation.latitude, currentLocation.longitude)
-        val endLatLng = LatLng(target.latitude, target.longitude)
-
-        routeNavigator?.searchRoute(startLatLng, endLatLng)
+        // 使用高德路径规划 API
+        aMapRouteClient?.searchWalkingRoute(
+            originLat = currentLocation.latitude,
+            originLng = currentLocation.longitude,
+            destLat = target.latitude,
+            destLng = target.longitude
+        )
         Toast.makeText(requireContext(), "正在规划路线...", Toast.LENGTH_SHORT).show()
     }
 
@@ -689,13 +812,15 @@ class MapFragment : Fragment() {
         rvSearchResults = binding.rvSearchResults
 
         searchResultAdapter = SearchResultAdapter { location ->
-            // 选中结果：移动相机 → 展开详情 → 清空搜索
+            // 显示详情弹窗
+            showLocationDetailCard(location)
+            // 同时更新 ViewModel 的选择状态
+            viewModel.selectLocation(location)
             hideSearchResults()
             val update = com.amap.api.maps.CameraUpdateFactory.newLatLngZoom(
                 LatLng(location.latitude, location.longitude), 17f
             )
             aMap?.moveCamera(update)
-            viewModel.selectLocation(location)
         }
         rvSearchResults?.adapter = searchResultAdapter
     }

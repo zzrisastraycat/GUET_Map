@@ -1,6 +1,7 @@
 package com.example.guet_map.ui.map
 
 import android.graphics.Color
+import android.util.Log
 import com.amap.api.maps.AMap
 import com.amap.api.maps.model.BitmapDescriptorFactory
 import com.amap.api.maps.model.LatLng
@@ -10,10 +11,11 @@ import com.example.guet_map.R
 
 /**
  * 导航管理器
- * 使用简化路径算法：在两点之间生成模拟路径点
+ * 负责在地图上绘制路径和标记
  */
 class RouteNavigator(private val aMap: AMap) {
 
+    private val TAG = "RouteNavigator"
     private var startMarker: com.amap.api.maps.model.Marker? = null
     private var endMarker: com.amap.api.maps.model.Marker? = null
     private var polyline: com.amap.api.maps.model.Polyline? = null
@@ -24,6 +26,48 @@ class RouteNavigator(private val aMap: AMap) {
 
     private var currentStart: LatLng? = null
     private var currentEnd: LatLng? = null
+
+    /**
+     * 绘制高德路径规划结果
+     */
+    fun drawRoute(routeResult: RouteResult) {
+        clearRoute()
+
+        // 收集所有路径点
+        val allPoints = mutableListOf<LatLng>()
+        routeResult.steps.forEach { step ->
+            step.polyline.forEach { (lat, lng) ->
+                allPoints.add(LatLng(lat, lng))
+            }
+        }
+
+        if (allPoints.size < 2) {
+            Log.w(TAG, "路径点不足，无法绘制")
+            onError?.invoke("路径数据不足")
+            return
+        }
+
+        // 设置起点和终点
+        currentStart = allPoints.first()
+        currentEnd = allPoints.last()
+
+        // 绘制路径线（蓝色）
+        polyline = aMap.addPolyline(
+            PolylineOptions()
+                .add(*allPoints.toTypedArray())
+                .color(Color.parseColor("#1A73E8"))
+                .width(15f)
+        )
+
+        // 添加起点和终点标记
+        addMarkers(currentStart!!, currentEnd!!)
+
+        // 调整地图视野
+        fitRouteView(allPoints)
+
+        // 回调
+        onRouteCalculated?.invoke(routeResult)
+    }
 
     /**
      * 搜索步行路径（模拟）
@@ -68,7 +112,13 @@ class RouteNavigator(private val aMap: AMap) {
         val duration = (distance / 1.2).toInt()
 
         // 回调
-        onRouteCalculated?.invoke(RouteResult(distance, duration))
+        val result = RouteResult(
+            distance = distance.toInt().toString(),
+            duration = duration.toString(),
+            strategy = "步行",
+            steps = emptyList()
+        )
+        onRouteCalculated?.invoke(result)
     }
 
     /**
@@ -83,8 +133,6 @@ class RouteNavigator(private val aMap: AMap) {
         endMarker?.remove()
         startMarker = null
         endMarker = null
-        currentStart = null
-        currentEnd = null
     }
 
     /**
@@ -145,9 +193,6 @@ class RouteNavigator(private val aMap: AMap) {
 
     /**
      * 生成两点之间的模拟路径点
-     * @param start 起点
-     * @param end 终点
-     * @param numPoints 生成的点数
      */
     private fun generateRoutePoints(start: LatLng, end: LatLng, numPoints: Int): List<LatLng> {
         val points = mutableListOf<LatLng>()
@@ -184,12 +229,4 @@ class RouteNavigator(private val aMap: AMap) {
     fun destroy() {
         clearRoute()
     }
-
-    /**
-     * 路径结果数据类
-     */
-    data class RouteResult(
-        val distance: Double, // 距离（米）
-        val duration: Int     // 耗时（秒）
-    )
 }
