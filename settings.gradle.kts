@@ -15,9 +15,11 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+
         // 高德 SDK（3dmap / search）
         maven { url = uri("https://maven.aliyun.com/repository/public") }
         maven { url = uri("https://a.amap.com/lbs/static/unzip/AndroidMapSDK/android_studio/") }
+
     }
 }
 

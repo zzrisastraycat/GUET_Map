@@ -1,0 +1,152 @@
+---
+description: Android + Kotlin 编码规范 for GUET_Map
+globs: **/*.kt
+alwaysApply: true
+---
+
+# GUET_Map Android 项目编码规范
+
+## 1. 项目架构
+
+- **包结构**: `com.example.guet_map.{di, local, model, network, repository, ui.*}`
+- **架构模式**: MVVM + Clean Architecture
+- **依赖注入**: 使用 Hilt，禁止手动创建实例
+
+## 2. ViewModel 规范
+
+### 状态管理
+```kotlin
+// ✅ 使用 StateFlow 管理 UI 状态
+private val _uiState = MutableStateFlow<UiState>(UiState.Loading)
+val uiState: StateFlow<UiState> = _uiState.asStateFlow()
+
+// ❌ 避免使用 LiveData 暴露可变状态
+// ❌ 避免直接暴露 MutableStateFlow
+```
+
+### 生命周期
+```kotlin
+// ✅ 在 viewModelScope 中启动协程
+viewModelScope.launch {
+    // 异步操作
+}
+
+// ✅ 使用 repeatOnLifecycle 收集 Flow
+repeatOnLifecycle(Lifecycle.State.STARTED) {
+    viewModel.flow.collect { }
+}
+```
+
+## 3. Repository 规范
+
+### 返回类型
+```kotlin
+// ✅ 使用 Resource sealed class 封装网络结果
+fun getData(): Flow<Resource<T>> = flow {
+    emit(Resource.Loading)
+    try {
+        emit(Resource.Success(data))
+    } catch (e: IOException) {
+        emit(Resource.Error(e.message))
+    }
+}
+
+// ✅ 优先返回 Flow，支持冷流和背压
+// ❌ 避免返回 LiveData 或直接返回 suspend 函数
+```
+
+### 缓存策略
+- 读取：先检查本地缓存，再请求网络
+- 写入：直接请求网络，失败时提供重试机制
+
+## 4. UI 层规范
+
+### Fragment
+```kotlin
+// ✅ 使用 viewLifecycleOwner 处理协程
+viewLifecycleOwner.lifecycleScope.launch {
+    viewModel.flow.collect { }
+}
+
+// ❌ 不要使用 this.lifecycleScope（可能已销毁）
+```
+
+### 布局绑定
+```kotlin
+// ✅ 使用 ViewBinding
+private var _binding: FragmentXxxBinding? = null
+private val binding get() = _binding!!
+
+override fun onViewCreated(...) {
+    _binding = FragmentXxxBinding.inflate(...)
+}
+
+override fun onDestroyView() {
+    super.onDestroyView()
+    _binding = null  // 防止内存泄漏
+}
+```
+
+## 5. 网络层规范
+
+### 异常处理
+```kotlin
+// ✅ 统一使用 IOException 判断网络错误
+catch (e: IOException) {
+    emit(Resource.Error("网络不可用"))
+}
+
+// ✅ 使用 ?: 简化空安全
+val data = cacheData ?: defaultValue
+```
+
+### API 定义
+```kotlin
+// ✅ 使用 Retrofit 接口
+interface ApiService {
+    @GET("endpoint")
+    suspend fun getData(): Response<T>
+}
+```
+
+## 6. 数据库规范
+
+### Room Entity
+```kotlin
+// ✅ 注解清晰，使用 TypeConverter 处理复杂类型
+@Entity(tableName = "table_name")
+data class Entity {
+    @PrimaryKey
+    val id: String,
+    val name: String,
+    @Embedded
+    val nested: NestedObject?
+}
+```
+
+## 7. 权限处理
+
+```kotlin
+// ✅ 使用 ActivityResultContracts 请求权限
+private val permissionLauncher = registerForActivityResult(
+    ActivityResultContracts.RequestMultiplePermissions()
+) { grants ->
+    if (grants[Manifest.permission.ACCESS_FINE_LOCATION] == true) {
+        // 权限已授予
+    }
+}
+```
+
+## 8. 地图功能规范
+
+### AMap 操作
+- 地图操作在主线程执行
+- 相机移动使用 `CameraUpdateFactory`
+- Marker 添加后保存引用以便管理
+
+## 9. 代码风格
+
+- 使用 Kotlin 风格：`it`、`?.`、`?:`、`::method`
+- 避免不必要的 `!!`
+- 常量定义在 companion object 或 top-level
+- 布局文件名：`fragment_{name}.xml`、`item_{name}.xml`

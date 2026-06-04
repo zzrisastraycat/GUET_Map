@@ -14,9 +14,11 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.InputMethodManager
+import android.widget.ImageButton
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.cardview.widget.CardView
 import androidx.core.content.ContextCompat
 import androidx.core.widget.ContentLoadingProgressBar
 import androidx.fragment.app.Fragment
@@ -43,14 +45,21 @@ import com.amap.api.maps.model.BitmapDescriptorFactory
 import com.amap.api.maps.model.LatLng
 import com.amap.api.maps.model.LatLngBounds
 import com.amap.api.maps.model.MarkerOptions
+
 import com.amap.api.maps.model.MyLocationStyle
 import com.amap.api.maps.model.Polyline
 import com.amap.api.maps.model.PolylineOptions
+
 import com.example.guet_map.R
 import com.example.guet_map.databinding.FragmentMapBinding
+import com.example.guet_map.databinding.LayoutNavigationPanelBinding
+import com.example.guet_map.databinding.LayoutLocationDetailBinding
 import com.example.guet_map.model.GuideStep
 import com.example.guet_map.model.Location
 import com.example.guet_map.model.Resource
+import com.example.guet_map.ui.map.RouteResult
+import coil.load
+import coil.transform.RoundedCornersTransformation
 import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import kotlinx.coroutines.flow.collectLatest
@@ -76,9 +85,16 @@ class MapFragment : Fragment() {
     /** 仅在为 true 时调用 MapView 生命周期，避免 onCreate 前 onResume 导致闪退 */
     private var mapViewCreated = false
 
-    private lateinit var locationManager: LocationManager
+    // 导航相关
+    private var routeNavigator: RouteNavigator? = null
+    private var navigationPanelBinding: LayoutNavigationPanelBinding? = null
+    private var navigationTarget: Location? = null
+
+    // 定位相关
+    private var aMapLocationClient: AMapLocationClient? = null
     private var myLocationMarker: com.amap.api.maps.model.Marker? = null
     private var latestLocation: android.location.Location? = null
+
     private var latestGcjLatLng: LatLng? = null
     private var routePolyline: Polyline? = null
     private var navTargetForExternal: Location? = null
@@ -86,7 +102,9 @@ class MapFragment : Fragment() {
     // 搜索相关
     private var cardSearchResults: androidx.cardview.widget.CardView? = null
     private var rvSearchResults: RecyclerView? = null
+
     private var suppressSearchResultsUntilEdit = false
+
 
     // BottomSheet 内部视图缓存
     private var sheetTitle: TextView? = null
@@ -112,13 +130,23 @@ class MapFragment : Fragment() {
         }
     }
 
+    // 导航面板视图缓存
+    private var tvRouteDistance: TextView? = null
+    private var tvRouteDuration: TextView? = null
+    private var tvNextStep: TextView? = null
+    private var cardNavigationPanel: CardView? = null
+
+    // 详情弹窗
+    private var locationDetailBinding: LayoutLocationDetailBinding? = null
+    private var cardLocationDetail: CardView? = null
+
     private val locationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { grants ->
         val fineGranted = grants[Manifest.permission.ACCESS_FINE_LOCATION] == true
         val coarseGranted = grants[Manifest.permission.ACCESS_COARSE_LOCATION] == true
         if (fineGranted || coarseGranted) {
-            startSystemLocation()
+            initAndStartAmapLocation()
         }
     }
 
@@ -136,9 +164,9 @@ class MapFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
-        locationManager = requireContext().getSystemService(LocationManager::class.java)
-
         setupBottomSheet()
+        setupNavigationPanel()
+        setupLocationDetail()
         setupFilterTags()
         setupSearchBar()
         setupSearch()
@@ -171,11 +199,13 @@ class MapFragment : Fragment() {
 
     override fun onDestroyView() {
         super.onDestroyView()
+
         stopSystemLocation()
         if (mapViewCreated) {
             binding.mapView.onDestroy()
             mapViewCreated = false
         }
+
         sheetTitle = null
         sheetRating = null
         sheetHours = null
@@ -185,6 +215,10 @@ class MapFragment : Fragment() {
         myLocationMarker = null
         cardSearchResults = null
         rvSearchResults = null
+        tvRouteDistance = null
+        tvRouteDuration = null
+        tvNextStep = null
+        cardNavigationPanel = null
         _binding = null
     }
 
@@ -258,12 +292,64 @@ class MapFragment : Fragment() {
             viewModel.aMap = map
             configureMap(map)
             setupMarkerClickListener(map)
+            initNavigation(map)
             viewModel.loadLocations()
             requestLocationPermissionIfNeeded()
         }
     }
 
+    /**
+     * 初始化导航功能
+     */
+    private fun initNavigation(map: AMap) {
+        routeNavigator = RouteNavigator(map)
+        routeNavigator?.onRouteCalculated = { result ->
+            activity?.runOnUiThread {
+                showNavigationPanel(result)
+            }
+        }
+        routeNavigator?.onError = { errorMsg ->
+            activity?.runOnUiThread {
+                Toast.makeText(requireContext(), errorMsg, Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    /**
+     * 显示导航面板
+     */
+    private fun showNavigationPanel(result: RouteResult) {
+        val panelBinding = navigationPanelBinding ?: return
+
+        // 获取路径信息
+        val distance = result.distanceInt
+        val duration = result.durationInt / 60
+
+        // 更新面板显示
+        panelBinding.tvRouteDistance.text = result.distanceKm
+        panelBinding.tvRouteDuration.text = duration.toString()
+
+        // 显示导航提示
+        panelBinding.tvNextStep.text = "点击「关闭」结束导航"
+
+        // 显示面板
+        panelBinding.cardNavigationPanel.visibility = View.VISIBLE
+
+        // 收起 BottomSheet
+        bottomSheetBehavior.state = BottomSheetBehavior.STATE_COLLAPSED
+    }
+
+    /**
+     * 隐藏导航面板
+     */
+    private fun hideNavigationPanel() {
+        navigationPanelBinding?.cardNavigationPanel?.visibility = View.GONE
+        routeNavigator?.clearRoute()
+        navigationTarget = null
+    }
+
     private fun configureMap(map: AMap) {
+        // 禁用高德内置定位引擎，避免与系统定位冲突和产生错误提示
         map.isMyLocationEnabled = false
 
         map.uiSettings.apply {
@@ -278,22 +364,15 @@ class MapFragment : Fragment() {
             setAllGesturesEnabled(true)
         }
 
-        val myLocationStyle = MyLocationStyle()
-        myLocationStyle.myLocationType(MyLocationStyle.LOCATION_TYPE_LOCATION_ROTATE_NO_CENTER)
-        myLocationStyle.interval(2000)
-        myLocationStyle.radiusFillColor(
-            ContextCompat.getColor(requireContext(), R.color.location_fill)
-        )
-        myLocationStyle.strokeColor(
-            ContextCompat.getColor(requireContext(), R.color.location_stroke)
-        )
-        myLocationStyle.strokeWidth(2f)
-        map.myLocationStyle = myLocationStyle
+        // 不再使用 MyLocationStyle，避免高德内部定位引擎自动启动
+        // 定位标记由系统 LocationManager 单独管理
 
         map.mapType = AMap.MAP_TYPE_NORMAL
 
         val cameraUpdate = com.amap.api.maps.CameraUpdateFactory.newLatLngZoom(
+
             com.amap.api.maps.model.LatLng(CampusGeo.CENTER_LAT, CampusGeo.CENTER_LNG), 16f
+
         )
         map.moveCamera(cameraUpdate)
     }
@@ -302,6 +381,9 @@ class MapFragment : Fragment() {
         map.setOnMarkerClickListener { marker ->
             val location = marker.`object` as? Location
             if (location != null) {
+                // 显示详情弹窗
+                showLocationDetailCard(location)
+                // 同时更新 ViewModel 的选择状态
                 viewModel.selectLocation(location)
             }
             false
@@ -319,7 +401,7 @@ class MapFragment : Fragment() {
         ) == PackageManager.PERMISSION_GRANTED
 
         if (hasFine || hasCoarse) {
-            startSystemLocation()
+            initAndStartAmapLocation()
             return
         }
 
@@ -351,24 +433,24 @@ class MapFragment : Fragment() {
         }
     }
 
-    // ── 系统定位 (LocationManager，不依赖高德定位引擎) ──────────
+    // ── 高德定位 ──────────────────────────────────────────────────
 
-    private val locationListener = android.location.LocationListener { location ->
-        onLocationReceived(location)
-    }
+    /**
+     * 初始化并启动高德定位
+     */
+    private fun initAndStartAmapLocation() {
+        aMapLocationClient = AMapLocationClient(requireContext())
 
-    private fun startSystemLocation() {
-        try {
-            val providers = locationManager.getProviders(true)
-            for (provider in providers) {
-                locationManager.requestLocationUpdates(
-                    provider, 2000L, 5f, locationListener
-                )
-            }
-        } catch (e: SecurityException) {
-            // 权限不足
+        aMapLocationClient?.onLocationResult = { amapLocation ->
+            onAmapLocationReceived(amapLocation)
         }
+
+        // 错误不提示，静默重试
+        aMapLocationClient?.onLocationError = { _, _ -> }
+
+        aMapLocationClient?.start()
     }
+
 
     private fun onLocationReceived(location: android.location.Location) {
         val gcj = com.example.guet_map.util.CoordinateUtil.wgs84ToGcj02(
@@ -380,6 +462,7 @@ class MapFragment : Fragment() {
         latestGcjLatLng = LatLng(gcj.latitude, gcj.longitude)
         val map = aMap ?: return
         val latLng = latestGcjLatLng!!
+
 
         // 更新或创建定位标记
         if (myLocationMarker == null) {
@@ -393,12 +476,13 @@ class MapFragment : Fragment() {
         } else {
             myLocationMarker?.position = latLng
         }
-    }
 
-    private fun stopSystemLocation() {
-        try {
-            locationManager.removeUpdates(locationListener)
-        } catch (_: Exception) {}
+        // 首次定位成功且未手动移动地图时，自动居中一次
+        if (!hasAutoCenteredOnLocation && amapLocation.accuracy < 50) {
+            hasAutoCenteredOnLocation = true
+            val update = com.amap.api.maps.CameraUpdateFactory.newLatLngZoom(latLng, 17f)
+            map.animateCamera(update, 500, null)
+        }
     }
 
     // ── My Location button ───────────────────────────────────────────
@@ -754,8 +838,137 @@ class MapFragment : Fragment() {
         }
     }
 
+    /**
+     * 设置导航面板
+     */
+    private fun setupNavigationPanel() {
+        // 初始化路径规划客户端
+        aMapRouteClient = AMapRouteClient(requireContext()).apply {
+            onRouteResult = { result ->
+                onRouteResultReceived(result)
+            }
+            onRouteError = { error ->
+                Toast.makeText(requireContext(), error, Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        val navPanelView = layoutInflater.inflate(R.layout.layout_navigation_panel, null)
+        navigationPanelBinding = LayoutNavigationPanelBinding.bind(navPanelView)
+
+        // 缓存视图引用
+        tvRouteDistance = navigationPanelBinding?.tvRouteDistance
+        tvRouteDuration = navigationPanelBinding?.tvRouteDuration
+        tvNextStep = navigationPanelBinding?.tvNextStep
+        cardNavigationPanel = navigationPanelBinding?.cardNavigationPanel
+
+        // 关闭按钮
+        navigationPanelBinding?.btnCloseNavigation?.setOnClickListener {
+            hideNavigationPanel()
+        }
+
+        // 将导航面板添加到地图容器
+        val container = binding.root.findViewById<ViewGroup>(R.id.mapContainer)
+        container?.addView(navPanelView)
+    }
+
+    /**
+     * 设置地点详情弹窗
+     */
+    private fun setupLocationDetail() {
+        val detailView = layoutInflater.inflate(R.layout.layout_location_detail, null)
+        locationDetailBinding = LayoutLocationDetailBinding.bind(detailView)
+        cardLocationDetail = locationDetailBinding?.cardLocationDetail
+
+        // 关闭按钮
+        locationDetailBinding?.btnCloseDetail?.setOnClickListener {
+            hideLocationDetail()
+        }
+
+        // 导航按钮
+        locationDetailBinding?.btnNavigate?.setOnClickListener {
+            hideLocationDetail()
+            startNavigation()
+        }
+
+        // 收藏按钮
+        locationDetailBinding?.btnFavorite?.setOnClickListener {
+            Toast.makeText(requireContext(), "已加入收藏", Toast.LENGTH_SHORT).show()
+        }
+
+        // 将详情弹窗添加到地图容器
+        val container = binding.root.findViewById<ViewGroup>(R.id.mapContainer)
+        container?.addView(detailView)
+    }
+
+    /**
+     * 显示地点详情弹窗
+     */
+    private fun showLocationDetailCard(location: Location) {
+        val binding = locationDetailBinding ?: return
+
+        // 填充数据
+        binding.tvLocationName.text = location.name
+        binding.tvCategory.text = location.category
+        binding.tvRating.text = String.format("%.1f", location.rating)
+        binding.tvAddress.text = if (location.address.isNotEmpty()) location.address else "暂无地址信息"
+        binding.tvOpeningHours.text = if (location.openingHours.isNotEmpty()) location.openingHours else "全天开放"
+        binding.tvDescription.text = if (location.description.isNotEmpty()) location.description else "暂无详细描述"
+
+        // 电话（如果有）
+        if (location.phone.isNotEmpty()) {
+            binding.llPhone.visibility = View.VISIBLE
+            binding.tvPhone.text = location.phone
+        } else {
+            binding.llPhone.visibility = View.GONE
+        }
+
+        // 加载图片
+        if (location.imageUrl.isNotEmpty()) {
+            binding.ivLocationImage.load(location.imageUrl) {
+                crossfade(true)
+                placeholder(R.drawable.ic_location_placeholder)
+                error(R.drawable.ic_location_placeholder)
+            }
+        } else {
+            binding.ivLocationImage.setImageResource(R.drawable.ic_location_placeholder)
+        }
+
+        // 显示弹窗
+        cardLocationDetail?.visibility = View.VISIBLE
+
+        // 收起 BottomSheet
+        bottomSheetBehavior.state = BottomSheetBehavior.STATE_COLLAPSED
+    }
+
+    /**
+     * 隐藏地点详情弹窗
+     */
+    private fun hideLocationDetail() {
+        cardLocationDetail?.visibility = View.GONE
+    }
+
+    private fun onRouteResultReceived(result: RouteResult) {
+        currentRouteResult = result
+
+        // 显示导航面板
+        cardNavigationPanel?.visibility = View.VISIBLE
+
+        // 更新距离和时间显示
+        tvRouteDistance?.text = result.distanceKm
+        tvRouteDuration?.text = (result.durationInt / 60).toString()
+
+        // 显示第一步指示
+        if (result.steps.isNotEmpty()) {
+            tvNextStep?.text = result.steps.first().instruction
+        }
+
+        // 在地图上绘制路径
+        routeNavigator?.drawRoute(result)
+    }
+
     private fun configureActionButtons(root: View) {
         root.findViewById<View>(R.id.btnNavigate)?.setOnClickListener {
+
             val loc = currentSheetLocation ?: return@setOnClickListener
             navTargetForExternal = loc
             startCampusWalkNavigation(loc)
@@ -780,6 +993,39 @@ class MapFragment : Fragment() {
             mainNavViewModel.requestTab(R.id.nav_contribute)
         }
     }
+
+
+  
+     * 开始导航
+     * 从当前位置导航到选中的地点
+     */
+    private fun startNavigation() {
+        val target = viewModel.selectedLocation.value
+        val currentLocation = latestLocation
+
+        if (target == null) {
+            Toast.makeText(requireContext(), "请先选择一个目的地", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        if (currentLocation == null) {
+            Toast.makeText(requireContext(), "正在获取您的位置信息...", Toast.LENGTH_SHORT).show()
+            requestLocationPermissionIfNeeded()
+            return
+        }
+
+        // 保存导航目标
+        navigationTarget = target
+
+        // 使用高德路径规划 API
+        aMapRouteClient?.searchWalkingRoute(
+            originLat = currentLocation.latitude,
+            originLng = currentLocation.longitude,
+            destLat = target.latitude,
+            destLng = target.longitude
+        )
+        Toast.makeText(requireContext(), "正在规划路线...", Toast.LENGTH_SHORT).show()
+    } // 注意：帮你补上了这个缺失的右括号
 
     // 修复崩溃1：ActivityNotFoundException - 改进导航Intent处理
     private fun openAmapExternalNavigation(location: Location) {
@@ -889,15 +1135,29 @@ class MapFragment : Fragment() {
     // ── Search bar ──────────────────────────────────────────────────
 
     private fun setupSearchBar() {
+        // 初始化高德搜索客户端
+        aMapSearchClient = AMapSearchClient(requireContext()).apply {
+            onPoiSearchResult = { results ->
+                showPoiSearchResults(results)
+            }
+            onSearchError = { error ->
+                Toast.makeText(requireContext(), error, Toast.LENGTH_SHORT).show()
+            }
+        }
+
         binding.etSearch.addTextChangedListener(object : TextWatcher {
+            private var searchRunnable: Runnable? = null
+
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+
                 val query = s?.toString().orEmpty()
                 suppressSearchResultsUntilEdit = false
                 viewModel.setSearchQuery(query)
                 if (query.isBlank()) {
                     cardSearchResults?.visibility = View.GONE
                 }
+
             }
             override fun afterTextChanged(s: Editable?) {}
         })
@@ -956,16 +1216,91 @@ class MapFragment : Fragment() {
         rvSearchResults = binding.rvSearchResults
 
         searchResultAdapter = SearchResultAdapter { location ->
+
             binding.etSearch.setText(location.name)
             binding.etSearch.setSelection(location.name.length)
             viewModel.pickFromSearch(location)
+
         }
         rvSearchResults?.adapter = searchResultAdapter
+    }
+
+    private fun showPoiSearchResults(results: List<PoiSearchResult>) {
+        // 清除之前的 POI 标记
+        clearPoiMarkers()
+
+        if (results.isEmpty()) {
+            Toast.makeText(requireContext(), "未找到相关地点", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        // 在地图上添加标记
+        results.forEachIndexed { index, poi ->
+            val marker = aMap?.addMarker(
+                MarkerOptions()
+                    .position(LatLng(poi.latitude, poi.longitude))
+                    .title(poi.name)
+                    .snippet(poi.address)
+                    .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE))
+            )
+            marker?.let { poiMarkers.add(it) }
+        }
+
+        // 自动居中到第一个结果
+        val firstResult = results.first()
+        val update = com.amap.api.maps.CameraUpdateFactory.newLatLngZoom(
+            LatLng(firstResult.latitude, firstResult.longitude), 16f
+        )
+        aMap?.animateCamera(update)
+
+        // 显示搜索结果列表
+        cardSearchResults?.visibility = View.VISIBLE
+        val locations = results.map { poi ->
+            Location(
+                locationId = poi.id,
+                name = poi.name,
+                latitude = poi.latitude,
+                longitude = poi.longitude,
+                category = "搜索结果",
+                rating = 0f,
+                openingHours = "",
+                imageUrl = "",
+                hasGuide = false
+            )
+        }
+        searchResultAdapter.submitList(locations)
+
+        // 设置 POI 点击事件
+        aMap?.setOnMarkerClickListener { marker ->
+            if (poiMarkers.contains(marker)) {
+                val index = poiMarkers.indexOf(marker)
+                if (index >= 0 && index < results.size) {
+                    val poi = results[index]
+                    Toast.makeText(requireContext(), "${poi.name}\n${poi.address}", Toast.LENGTH_LONG).show()
+                }
+                true
+            } else {
+                false
+            }
+        }
+    }
+
+    private fun clearPoiMarkers() {
+        poiMarkers.forEach { it.remove() }
+        poiMarkers.clear()
     }
 
     private fun showSearchResults(results: List<Location>) {
         cardSearchResults?.visibility = View.VISIBLE
         searchResultAdapter.submitList(results)
+        // 自动居中到第一个搜索结果
+        if (results.isNotEmpty()) {
+            val firstResult = results.first()
+            val update = com.amap.api.maps.CameraUpdateFactory.newLatLngZoom(
+                LatLng(firstResult.latitude, firstResult.longitude), 17f
+            )
+            aMap?.animateCamera(update)
+        }
     }
 
     private fun moveMapToLocation(location: Location) {
@@ -977,7 +1312,9 @@ class MapFragment : Fragment() {
 
     private fun dismissSearchUi() {
         cardSearchResults?.visibility = View.GONE
+
         suppressSearchResultsUntilEdit = true
+
         val imm = requireContext().getSystemService(InputMethodManager::class.java)
         imm.hideSoftInputFromWindow(binding.etSearch.windowToken, 0)
     }

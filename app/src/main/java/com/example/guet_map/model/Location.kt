@@ -9,5 +9,9 @@ data class Location(
     val rating: Float = 0f,
     val openingHours: String = "",
     val imageUrl: String = "",
-    val hasGuide: Boolean = false
+    val hasGuide: Boolean = false,
+    val address: String = "",
+    val phone: String = "",
+    val description: String = "",
+    val poiId: String = ""
 )

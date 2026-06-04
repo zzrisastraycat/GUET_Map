@@ -190,25 +190,37 @@ private val MY_GUIDES_JSON = """
 
 private val NOTIFICATIONS_JSON = """
 [
+
   {"id":1,"type":"review","title":"指引审核通过","body":"您提交的「第十一教学楼A区」步骤已通过，+5积分","locationId":"building_11a","isRead":false,"createdAt":"2026-06-02T10:00:00"},
   {"id":2,"type":"points","title":"积分到账","body":"您的校园贡献积分已更新为 15","locationId":null,"isRead":false,"createdAt":"2026-06-01T18:30:00"},
   {"id":3,"type":"announcement","title":"欢迎使用 GUET Map","body":"花江校区实景导航已上线，欢迎贡献指路！","locationId":null,"isRead":true,"createdAt":"2026-05-30T09:00:00"}
+
 ]
 """.trimIndent()
 
 private val LOCATION_DETAIL_JSON = mapOf(
+
     "building_11b" to """{"locationId":"building_11b","name":"第十一教学楼B区","latitude":25.30750,"longitude":110.41780,"category":"教室","rating":4.5,"openingHours":"07:00-22:30","imageUrl":"https://example.com/img/11b.jpg","hasGuide":true}""",
     "gate_south" to """{"locationId":"gate_south","name":"南门","latitude":25.30200,"longitude":110.41400,"category":"校门","rating":4.3,"openingHours":"","imageUrl":"","hasGuide":true}""",
     "library" to """{"locationId":"library","name":"校图书馆","latitude":25.2870,"longitude":110.4110,"category":"图书馆","rating":4.7,"openingHours":"08:00-22:00","imageUrl":"https://example.com/img/library.jpg","hasGuide":true}"""
+
 )
 
 private val GUIDE_STEPS_JSON = mapOf(
-    "building_11b" to """
+    "library" to """
 [
-  {"id":1,"locationId":"building_11b","stepNumber":1,"description":"从南门进入校园，沿主干道直行约200米","imageUrl":"https://example.com/guide/11b_01.jpg"},
-  {"id":2,"locationId":"building_11b","stepNumber":2,"description":"看到「创新大楼」指示牌后左转","imageUrl":"https://example.com/guide/11b_02.jpg"},
-  {"id":3,"locationId":"building_11b","stepNumber":3,"description":"走到创维半岛大厦西塔大门","imageUrl":"https://example.com/guide/11b_03.jpg"},
-  {"id":4,"locationId":"building_11b","stepNumber":4,"description":"乘坐电梯至3楼，出门后右侧即为B区入口","imageUrl":"https://example.com/guide/11b_04.jpg"}
+  {"id":1,"locationId":"library","stepNumber":1,"description":"从南门进入校园，沿主干道直行约800米","imageUrl":"https://example.com/guide/lib_01.jpg"},
+  {"id":2,"locationId":"library","stepNumber":2,"description":"经过中央食堂后继续直行","imageUrl":"https://example.com/img/central.jpg"},
+  {"id":3,"locationId":"library","stepNumber":3,"description":"看到研究生院大楼后右转","imageUrl":"https://example.com/img/graduate.jpg"},
+  {"id":4,"locationId":"library","stepNumber":4,"description":"沿着校园道路直行约200米","imageUrl":"https://example.com/img/path.jpg"},
+  {"id":5,"locationId":"library","stepNumber":5,"description":"到达图书馆大楼","imageUrl":"https://example.com/img/library.jpg"}
+]
+""".trimIndent(),
+    "gym" to """
+[
+  {"id":1,"locationId":"gym","stepNumber":1,"description":"从南门进入校园，沿主干道直行约600米","imageUrl":"https://example.com/guide/gym_01.jpg"},
+  {"id":2,"locationId":"gym","stepNumber":2,"description":"经过清苑宿舍区左转","imageUrl":"https://example.com/img/qingyuan.jpg"},
+  {"id":3,"locationId":"gym","stepNumber":3,"description":"直行约200米即可看到体育馆","imageUrl":"https://example.com/img/gym.jpg"}
 ]
 """.trimIndent(),
     "default" to """

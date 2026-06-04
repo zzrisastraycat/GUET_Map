@@ -1,0 +1,138 @@
+---
+description: MVVM 架构模式规范
+globs: **/*.kt
+alwaysApply: false
+---
+
+# MVVM 架构规范
+
+## 层级职责
+
+```
+UI (Fragment) → ViewModel → Repository → DataSource (Room/API)
+```
+
+| 层级 | 职责 | 禁止 |
+|------|------|------|
+| UI | 展示数据、响应用户操作 | 业务逻辑、数据获取 |
+| ViewModel | 管理 UI 状态、处理用户意图 | 直接操作数据库、网络 |
+| Repository | 数据聚合、缓存策略 | 业务决策 |
+| DataSource | 数据读写 | 业务逻辑 |
+
+## ViewModel 模式
+
+```kotlin
+class MyViewModel @Inject constructor(
+    private val repository: MyRepository
+) : ViewModel() {
+
+    // 私有可变状态
+    private val _state = MutableStateFlow<MyState>(MyState.Init)
+
+    // 公开不可变状态
+    val state: StateFlow<MyState> = _state.asStateFlow()
+
+    // 用户动作
+    fun onAction(action: MyAction) {
+        when (action) {
+            is MyAction.Load -> loadData()
+            is MyAction.Refresh -> refresh()
+        }
+    }
+
+    private fun loadData() {
+        viewModelScope.launch {
+            repository.getData().collect { resource ->
+                _state.value = when (resource) {
+                    is Resource.Loading -> MyState.Loading
+                    is Resource.Success -> MyState.Success(resource.data)
+                    is Resource.Error -> MyState.Error(resource.message)
+                }
+            }
+        }
+    }
+}
+```
+
+## 状态类设计
+
+```kotlin
+// UI 状态
+sealed class MyState {
+    data object Init : MyState()
+    data object Loading : MyState()
+    data class Success(val data: List<Item>) : MyState()
+    data class Error(val message: String) : MyState()
+}
+
+// 用户动作
+sealed class MyAction {
+    data object Load : MyAction()
+    data object Refresh : MyAction()
+    data class Select(val id: String) : MyAction()
+}
+```
+
+## Fragment 绑定
+
+```kotlin
+class MyFragment : Fragment() {
+
+    private var _binding: FragmentMyBinding? = null
+    private val binding get() = _binding!!
+
+    private val viewModel: MyViewModel by viewModels()
+
+    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        super.onViewCreated(view, savedInstanceState)
+        _binding = FragmentMyBinding.bind(view)
+
+        // 收集状态
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                viewModel.state.collect { state ->
+                    render(state)
+                }
+            }
+        }
+
+        // 设置点击监听
+        binding.btnSubmit.setOnClickListener {
+            viewModel.onAction(MyAction.Submit)
+        }
+    }
+
+    private fun render(state: MyState) {
+        when (state) {
+            is MyState.Loading -> showLoading()
+            is MyState.Success -> showData(state.data)
+            is MyState.Error -> showError(state.message)
+            else -> {}
+        }
+    }
+
+    override fun onDestroyView() {
+        super.onDestroyView()
+        _binding = null
+    }
+}
+```
+
+## Flow 收集规则
+
+```kotlin
+// ✅ 正确：在 Lifecycle.State.STARTED 时收集
+repeatOnLifecycle(Lifecycle.State.STARTED) {
+    viewModel.flow.collect { }
+}
+
+// ✅ 使用 WhileSubscribed 控制上游发布
+val flow = _flow.stateIn(
+    viewModelScope,
+    SharingStarted.WhileSubscribed(5000),
+    initialValue
+)
+
+// ❌ 避免在 launchIn 中使用，可能导致内存泄漏
+// ❌ 避免在 onCreate 中直接 launch
+```
