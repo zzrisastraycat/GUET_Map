@@ -86,6 +86,7 @@ class MapFragment : Fragment() {
     // 搜索相关
     private var cardSearchResults: androidx.cardview.widget.CardView? = null
     private var rvSearchResults: RecyclerView? = null
+    private var suppressSearchResultsUntilEdit = false
 
     // BottomSheet 内部视图缓存
     private var sheetTitle: TextView? = null
@@ -156,12 +157,6 @@ class MapFragment : Fragment() {
 
     override fun onResume() {
         super.onResume()
-        // #region agent log
-        com.example.guet_map.util.AgentDebugLog.log(
-            "S2", "MapFragment.onResume", "map lifecycle",
-            mapOf("mapViewCreated" to mapViewCreated), runId = "crash-fix"
-        )
-        // #endregion
         if (mapViewCreated) {
             binding.mapView.onResume()
         }
@@ -193,10 +188,15 @@ class MapFragment : Fragment() {
         _binding = null
     }
 
+    // 修复崩溃2：NullPointerException - 添加安全检查和try-catch
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
-        if (mapViewCreated) {
-            binding.mapView.onSaveInstanceState(outState)
+        try {
+            if (mapViewCreated && _binding != null) {
+                binding.mapView.onSaveInstanceState(outState)
+            }
+        } catch (e: Exception) {
+            // Fragment可能已被销毁，忽略保存状态失败的异常
         }
     }
 
@@ -207,11 +207,11 @@ class MapFragment : Fragment() {
             .setTitle("隐私政策与用户协议")
             .setMessage(
                 "欢迎使用GUET地图！\n\n" +
-                "我们将使用高德地图SDK为您提供定位与地图导航服务。" +
-                "在使用过程中，我们需要收集您的位置信息以提供精准的校内导航指引。\n\n" +
-                "您的位置数据仅用于本应用内的地图展示与导航功能，" +
-                "不会用于其他商业用途。\n\n" +
-                "点击「同意」即表示您已阅读并接受我们的《隐私政策》与《用户协议》。"
+                        "我们将使用高德地图SDK为您提供定位与地图导航服务。" +
+                        "在使用过程中，我们需要收集您的位置信息以提供精准的校内导航指引。\n\n" +
+                        "您的位置数据仅用于本应用内的地图展示与导航功能，" +
+                        "不会用于其他商业用途。\n\n" +
+                        "点击「同意」即表示您已阅读并接受我们的《隐私政策》与《用户协议》。"
             )
             .setPositiveButton("同意") { _, _ ->
                 viewModel.setPrivacyAgreed()
@@ -252,12 +252,6 @@ class MapFragment : Fragment() {
         if (mapViewCreated) return
         binding.mapView.onCreate(savedInstanceState)
         mapViewCreated = true
-        // #region agent log
-        com.example.guet_map.util.AgentDebugLog.log(
-            "S2", "MapFragment.initMap", "mapView onCreate done",
-            emptyMap(), runId = "crash-fix"
-        )
-        // #endregion
 
         binding.mapView.map?.let { map ->
             aMap = map
@@ -331,7 +325,7 @@ class MapFragment : Fragment() {
 
         val shouldShowRationale =
             shouldShowRequestPermissionRationale(Manifest.permission.ACCESS_FINE_LOCATION) ||
-            shouldShowRequestPermissionRationale(Manifest.permission.ACCESS_COARSE_LOCATION)
+                    shouldShowRequestPermissionRationale(Manifest.permission.ACCESS_COARSE_LOCATION)
 
         if (shouldShowRationale) {
             MaterialAlertDialogBuilder(requireContext())
@@ -382,21 +376,6 @@ class MapFragment : Fragment() {
             location.latitude,
             location.longitude
         )
-        // #region agent log
-        com.example.guet_map.util.AgentDebugLog.log(
-            "L1",
-            "MapFragment.onLocationReceived",
-            "coord converted",
-            mapOf(
-                "wgsLat" to location.latitude,
-                "wgsLon" to location.longitude,
-                "gcjLat" to gcj.latitude,
-                "gcjLon" to gcj.longitude,
-                "provider" to (location.provider ?: "unknown")
-            ),
-            runId = "post-fix2"
-        )
-        // #endregion
         latestLocation = location
         latestGcjLatLng = LatLng(gcj.latitude, gcj.longitude)
         val map = aMap ?: return
@@ -472,6 +451,8 @@ class MapFragment : Fragment() {
                                 moveMapToLocation(event.location)
                                 viewModel.showHighlightMarker(event.location)
                             }
+                            is MapEvent.HideBottomSheet -> hideLocationSheet()
+                            is MapEvent.DismissSearchUi -> dismissSearchUi()
                         }
                     }
                 }
@@ -505,6 +486,10 @@ class MapFragment : Fragment() {
                 // 搜索结果
                 launch {
                     viewModel.searchResults.collectLatest { results ->
+                        if (suppressSearchResultsUntilEdit) {
+                            cardSearchResults?.visibility = View.GONE
+                            return@collectLatest
+                        }
                         if (results.isNotEmpty()) {
                             showSearchResults(results)
                         } else {
@@ -623,14 +608,6 @@ class MapFragment : Fragment() {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
                 launch {
                     mainNavViewModel.pendingLocationId.collectLatest { locationId ->
-                        // #region agent log
-                        com.example.guet_map.util.AgentDebugLog.log(
-                            "H2",
-                            "MapFragment.observeMainNav",
-                            "pendingLocationId emit",
-                            mapOf("locationId" to locationId)
-                        )
-                        // #endregion
                         locationId ?: return@collectLatest
                         val id = mainNavViewModel.consumePendingLocation() ?: return@collectLatest
                         openLocationOnMap(id)
@@ -652,30 +629,8 @@ class MapFragment : Fragment() {
 
     private fun openLocationOnMap(locationId: String) {
         viewLifecycleOwner.lifecycleScope.launch {
-            // #region agent log
-            com.example.guet_map.util.AgentDebugLog.log(
-                "H1",
-                "MapFragment.openLocationOnMap",
-                "entry",
-                mapOf(
-                    "locationId" to locationId,
-                    "cacheSize" to viewModel.cachedLocations.value.size,
-                    "aMapNull" to (aMap == null)
-                ),
-                runId = "post-fix"
-            )
-            // #endregion
             val loc = viewModel.resolveAndSelectLocation(locationId)
             if (loc == null) {
-                // #region agent log
-                com.example.guet_map.util.AgentDebugLog.log(
-                    "H4",
-                    "MapFragment.openLocationOnMap",
-                    "no location after resolve",
-                    mapOf("locationId" to locationId),
-                    runId = "post-fix"
-                )
-                // #endregion
                 return@launch
             }
             aMap?.moveCamera(
@@ -683,79 +638,16 @@ class MapFragment : Fragment() {
                     LatLng(loc.latitude, loc.longitude), 17f
                 )
             )
-            // #region agent log
-            com.example.guet_map.util.AgentDebugLog.log(
-                "H1",
-                "MapFragment.openLocationOnMap",
-                "camera moved",
-                mapOf("locationId" to locationId),
-                runId = "post-fix"
-            )
-            // #endregion
         }
     }
 
     private fun setupMenuButton() {
         binding.ivMenu.setOnClickListener {
-            showLoginDialog()
+            mainNavViewModel.requestTab(R.id.nav_login)
         }
-    }
-
-    private fun showLoginDialog() {
-        val usernameInput = android.widget.EditText(requireContext()).apply {
-            hint = "学号 / 用户名"
+        binding.ivAvatar.setOnClickListener {
+            mainNavViewModel.requestTab(R.id.nav_login)
         }
-        val passwordInput = android.widget.EditText(requireContext()).apply {
-            hint = "密码"
-            inputType = android.text.InputType.TYPE_CLASS_TEXT or
-                android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
-        }
-        val container = android.widget.LinearLayout(requireContext()).apply {
-            orientation = android.widget.LinearLayout.VERTICAL
-            setPadding(48, 24, 48, 0)
-            addView(usernameInput)
-            addView(passwordInput)
-        }
-        val title = if (authRepository.isLoggedIn) {
-            "已登录：${authRepository.nickname}（${userPrefs.points} 积分）"
-        } else {
-            getString(R.string.login_title)
-        }
-        MaterialAlertDialogBuilder(requireContext())
-            .setTitle(title)
-            .setMessage(getString(R.string.login_hint))
-            .setView(container)
-            .setPositiveButton(if (authRepository.isLoggedIn) "退出" else "登录") { _, _ ->
-                if (authRepository.isLoggedIn) {
-                    authRepository.logout()
-                    Toast.makeText(requireContext(), "已退出登录", Toast.LENGTH_SHORT).show()
-                } else {
-                    viewLifecycleOwner.lifecycleScope.launch {
-                        authRepository.login(
-                            usernameInput.text.toString().ifBlank { "guest" },
-                            passwordInput.text.toString().ifBlank { "guest" }
-                        ).collect { resource ->
-                            when (resource) {
-                                is Resource.Success ->
-                                    Toast.makeText(
-                                        requireContext(),
-                                        "欢迎，${resource.data.nickname}",
-                                        Toast.LENGTH_SHORT
-                                    ).show()
-                                is Resource.Error ->
-                                    Toast.makeText(
-                                        requireContext(),
-                                        resource.message,
-                                        Toast.LENGTH_SHORT
-                                    ).show()
-                                else -> {}
-                            }
-                        }
-                    }
-                }
-            }
-            .setNegativeButton("关闭", null)
-            .show()
     }
 
     private fun updateFavoriteButton(favoriteIds: Set<String>) {
@@ -889,11 +781,14 @@ class MapFragment : Fragment() {
         }
     }
 
+    // 修复崩溃1：ActivityNotFoundException - 改进导航Intent处理
     private fun openAmapExternalNavigation(location: Location) {
         val target = viewModel.cachedLocations.value
             .find { it.locationId == location.locationId } ?: location
         val pm = requireContext().packageManager
+
         try {
+            // 方案1：尝试高德地图App
             val start = latestGcjLatLng
             val uriBuilder = StringBuilder("androidamap://route/plan/?")
             uriBuilder.append("dlat=${target.latitude}&dlon=${target.longitude}")
@@ -903,21 +798,54 @@ class MapFragment : Fragment() {
                 uriBuilder.append("&slat=${start.latitude}&slon=${start.longitude}")
                 uriBuilder.append("&sname=${Uri.encode("我的位置")}")
             }
+
             val amapIntent = Intent(Intent.ACTION_VIEW, Uri.parse(uriBuilder.toString())).apply {
                 setPackage("com.autonavi.minimap")
             }
+
             if (amapIntent.resolveActivity(pm) != null) {
                 startActivity(amapIntent)
                 return
             }
+
+            // 方案2：尝试通用geo协议（Google Maps等）
             val geoUri = Uri.parse(
                 "geo:${target.latitude},${target.longitude}?q=${Uri.encode(target.name)}"
             )
             val geoIntent = Intent(Intent.ACTION_VIEW, geoUri)
+
             if (geoIntent.resolveActivity(pm) != null) {
                 startActivity(Intent.createChooser(geoIntent, getString(R.string.nav_amap_app)))
+                return
+            }
+
+            // 方案3：如果都没有，打开网页版地图
+            val webUri = Uri.parse(
+                "https://uri.amap.com/marker?position=${target.longitude},${target.latitude}&name=${Uri.encode(target.name)}"
+            )
+            val webIntent = Intent(Intent.ACTION_VIEW, webUri)
+
+            if (webIntent.resolveActivity(pm) != null) {
+                Toast.makeText(
+                    requireContext(),
+                    "未安装地图应用，将使用浏览器打开网页地图",
+                    Toast.LENGTH_LONG
+                ).show()
+                startActivity(webIntent)
             } else {
-                Toast.makeText(requireContext(), "未找到可用的导航应用", Toast.LENGTH_SHORT).show()
+                // 最后的备选方案：复制坐标到剪贴板
+                val clipboard = requireContext().getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                        as android.content.ClipboardManager
+                val clip = android.content.ClipData.newPlainText(
+                    "坐标",
+                    "${target.name}: ${target.latitude}, ${target.longitude}"
+                )
+                clipboard.setPrimaryClip(clip)
+                Toast.makeText(
+                    requireContext(),
+                    "未找到可用导航应用，坐标已复制到剪贴板",
+                    Toast.LENGTH_LONG
+                ).show()
             }
         } catch (e: Exception) {
             Toast.makeText(
@@ -964,7 +892,12 @@ class MapFragment : Fragment() {
         binding.etSearch.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-                viewModel.setSearchQuery(s?.toString().orEmpty())
+                val query = s?.toString().orEmpty()
+                suppressSearchResultsUntilEdit = false
+                viewModel.setSearchQuery(query)
+                if (query.isBlank()) {
+                    cardSearchResults?.visibility = View.GONE
+                }
             }
             override fun afterTextChanged(s: Editable?) {}
         })
@@ -975,7 +908,6 @@ class MapFragment : Fragment() {
                 val q = binding.etSearch.text?.toString().orEmpty()
                 if (q.isNotBlank()) {
                     viewModel.submitSearch(q)
-                    hideSearchResults()
                 }
                 true
             } else {
@@ -1024,8 +956,9 @@ class MapFragment : Fragment() {
         rvSearchResults = binding.rvSearchResults
 
         searchResultAdapter = SearchResultAdapter { location ->
-            hideSearchResults()
-            viewModel.focusOnLocation(location)
+            binding.etSearch.setText(location.name)
+            binding.etSearch.setSelection(location.name.length)
+            viewModel.pickFromSearch(location)
         }
         rvSearchResults?.adapter = searchResultAdapter
     }
@@ -1042,11 +975,17 @@ class MapFragment : Fragment() {
         aMap?.animateCamera(update)
     }
 
-    private fun hideSearchResults() {
+    private fun dismissSearchUi() {
         cardSearchResults?.visibility = View.GONE
-        binding.etSearch.text?.clear()
+        suppressSearchResultsUntilEdit = true
         val imm = requireContext().getSystemService(InputMethodManager::class.java)
         imm.hideSoftInputFromWindow(binding.etSearch.windowToken, 0)
+    }
+
+    private fun hideLocationSheet() {
+        if (::bottomSheetBehavior.isInitialized) {
+            bottomSheetBehavior.state = BottomSheetBehavior.STATE_HIDDEN
+        }
     }
 
     // ── Utility ─────────────────────────────────────────────────────

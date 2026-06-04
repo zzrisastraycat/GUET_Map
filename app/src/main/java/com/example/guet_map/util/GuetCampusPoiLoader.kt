@@ -59,6 +59,13 @@ class GuetCampusPoiLoader @Inject constructor(
             add("桂电花江校区")
             add("花江校区食堂")
             add("花江校区宿舍")
+            add("花江校区图书馆")
+            add("花江校区教学楼")
+            add("花江校区实验楼")
+            add("花江校区行政楼")
+            add("花江校区服务中心")
+            add("花江校区运动场")
+            add("花江校区校门")
             (1..17).forEach { n ->
                 val cn = when (n) {
                     1 -> "一"; 2 -> "二"; 3 -> "三"; 4 -> "四"; 5 -> "五"; 6 -> "六"; 7 -> "七"
@@ -66,6 +73,12 @@ class GuetCampusPoiLoader @Inject constructor(
                     14 -> "十四"; 15 -> "十五"; 16 -> "十六"; 17 -> "十七"
                     else -> n.toString()
                 }
+                add("${n}教")
+                add("${cn}教")
+                add("第${cn}教学楼")
+                add("第${n}教学楼")
+                add("${n}号楼")
+                add("${cn}号楼")
                 add("桂林电子科技大学花江校区第${cn}教学楼")
             }
         }

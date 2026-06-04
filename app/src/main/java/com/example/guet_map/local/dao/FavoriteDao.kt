@@ -10,21 +10,21 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface FavoriteDao {
 
-    @Query("SELECT * FROM favorites ORDER BY added_at DESC")
-    fun observeAll(): Flow<List<FavoriteEntity>>
+    @Query("SELECT * FROM favorites WHERE user_id = :userId ORDER BY added_at DESC")
+    fun observeAll(userId: String): Flow<List<FavoriteEntity>>
 
-    @Query("SELECT location_id FROM favorites")
-    fun observeFavoriteIds(): Flow<List<String>>
+    @Query("SELECT location_id FROM favorites WHERE user_id = :userId")
+    fun observeFavoriteIds(userId: String): Flow<List<String>>
 
-    @Query("SELECT COUNT(*) FROM favorites WHERE location_id = :locationId")
-    suspend fun isFavorite(locationId: String): Int
+    @Query("SELECT COUNT(*) FROM favorites WHERE user_id = :userId AND location_id = :locationId")
+    suspend fun isFavorite(userId: String, locationId: String): Int
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(entity: FavoriteEntity)
 
-    @Query("DELETE FROM favorites WHERE location_id = :locationId")
-    suspend fun delete(locationId: String)
+    @Query("DELETE FROM favorites WHERE user_id = :userId AND location_id = :locationId")
+    suspend fun delete(userId: String, locationId: String)
 
-    @Query("DELETE FROM favorites")
-    suspend fun deleteAll()
+    @Query("DELETE FROM favorites WHERE user_id = :userId")
+    suspend fun deleteAllForUser(userId: String)
 }

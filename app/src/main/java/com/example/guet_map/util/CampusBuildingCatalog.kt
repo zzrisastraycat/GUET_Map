@@ -74,6 +74,15 @@ object CampusBuildingCatalog {
     )
 
     val extraCampusPlaces: List<BuildingEntry> = listOf(
+        BuildingEntry("foreign_language", "外国语学院", "桂林电子科技大学花江校区外国语学院", listOf("外国语学院", "外院"), "学院", 25.30788, 110.41892, true),
+        BuildingEntry("information_communication", "信息与通信学院", "桂林电子科技大学花江校区信息与通信学院", listOf("信息与通信学院", "信通学院", "信息通信学院"), "学院", 25.30826, 110.41830, true),
+        BuildingEntry("health_service", "卫生所", "桂林电子科技大学花江校区卫生所", listOf("卫生所", "校卫生所", "医务室"), "医疗", 25.30918, 110.41890, true),
+        BuildingEntry("student_activity_center", "学生活动中心", "桂林电子科技大学花江校区学生活动中心", listOf("学生活动中心", "活动中心"), "活动中心", 25.30862, 110.41935),
+        BuildingEntry("robot_center", "机器人中心", "桂林电子科技大学花江校区机器人中心", listOf("机器人中心", "机器人实验中心"), "科研", 25.30892, 110.41858),
+        BuildingEntry("sichuang_center", "四创中心", "桂林电子科技大学花江校区四创中心", listOf("四创中心", "四创基地"), "科研", 25.30872, 110.41792),
+        BuildingEntry("huajiang_huigu", "花江慧谷", "桂林电子科技大学花江校区花江慧谷", listOf("花江慧谷", "慧谷"), "商圈", 25.30922, 110.41985),
+        BuildingEntry("yiyuan_canteen", "怡园餐厅", "桂林电子科技大学花江校区怡园餐厅", listOf("怡园餐厅", "怡园食堂", "怡园"), "食堂", 25.30672, 110.41862, true),
+        BuildingEntry("zhongyuan_canteen", "仲园餐厅", "桂林电子科技大学花江校区仲园餐厅", listOf("仲园餐厅", "仲园食堂", "仲园"), "食堂", 25.30698, 110.41908, true),
         BuildingEntry("gate_south", "南门", "桂林电子科技大学花江校区南门", listOf("南门", "南大门"), "校门", CampusGeo.GATE_SOUTH_LAT, CampusGeo.GATE_SOUTH_LNG, true),
         BuildingEntry("gate_north", "北门", "桂林电子科技大学花江校区北门", listOf("北门", "北大门"), "校门", 25.31180, 110.41780),
         BuildingEntry("library", "花江校区图书馆", "桂林电子科技大学花江校区图书馆", listOf("图书馆", "图图", "校图书馆"), "图书馆", 25.30980, 110.41620, true),
@@ -139,6 +148,9 @@ object CampusBuildingCatalog {
             hasGuide = entry.hasGuide
         )
     }
+
+    fun findTeachingBuilding(n: Int): BuildingEntry? =
+        teachingBuildings.firstOrNull { it.locationId == "building_$n" }
 
     fun findEntryByAlias(query: String): BuildingEntry? {
         val q = query.trim()

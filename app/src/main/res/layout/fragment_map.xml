@@ -131,9 +131,10 @@
         android:id="@+id/bottomSheet"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:background="?attr/colorSurface"
+        android:background="@drawable/bg_bottom_sheet"
+        android:elevation="12dp"
         app:layout_behavior="com.google.android.material.bottomsheet.BottomSheetBehavior"
-        app:behavior_peekHeight="48dp"
+        app:behavior_peekHeight="56dp"
         app:behavior_hideable="false" />
 
 </androidx.coordinatorlayout.widget.CoordinatorLayout>

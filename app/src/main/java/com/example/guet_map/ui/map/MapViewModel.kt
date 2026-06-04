@@ -14,7 +14,9 @@ import com.example.guet_map.model.WalkRouteInfo
 import com.example.guet_map.util.CampusGeo
 import com.example.guet_map.util.CampusLocationResolver
 import com.example.guet_map.util.CampusSearchMatcher
+import com.example.guet_map.util.CampusSearchQueryNormalizer
 import com.example.guet_map.util.CampusWalkRoutePlanner
+import com.example.guet_map.data.UserPrefs
 import com.example.guet_map.repository.FavoriteRepository
 import com.example.guet_map.repository.GuideRepository
 import com.example.guet_map.repository.LocationRepository
@@ -38,7 +40,8 @@ class MapViewModel @Inject constructor(
     private val locationRepository: LocationRepository,
     private val guideRepository: GuideRepository,
     private val favoriteRepository: FavoriteRepository,
-    private val walkRoutePlanner: CampusWalkRoutePlanner
+    private val walkRoutePlanner: CampusWalkRoutePlanner,
+    private val userPrefs: UserPrefs
 ) : ViewModel() {
 
     private val _walkRoute = MutableStateFlow<WalkRouteInfo?>(null)
@@ -51,10 +54,13 @@ class MapViewModel @Inject constructor(
     val routeError = _routeError.asSharedFlow()
 
     init {
+        favoriteRepository.switchUser(userPrefs.userId)
         viewModelScope.launch {
             try {
                 locationRepository.getLocations().first { it !is Resource.Loading }
-                favoriteRepository.syncFromServer()
+                if (userPrefs.isLoggedIn) {
+                    favoriteRepository.syncFromServer()
+                }
             } catch (_: Exception) {
             }
         }
@@ -115,10 +121,13 @@ class MapViewModel @Inject constructor(
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
 
-    /** 模糊搜索：简称（五教）、子序列、相关度排序 */
     val searchResults: StateFlow<List<Location>> = _searchQuery
         .combine(cachedLocations) { query, locations ->
-            CampusSearchMatcher.filterAndSort(locations, query)
+            CampusSearchMatcher.filterAndSort(
+                locations,
+                query,
+                limit = CampusSearchQueryNormalizer.MAX_SEARCH_RESULTS
+            )
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -126,12 +135,28 @@ class MapViewModel @Inject constructor(
         _searchQuery.value = query
     }
 
-    /** 键盘搜索 / 语音后定位到最佳匹配 */
+    fun clearSearchQuery() {
+        _searchQuery.value = ""
+    }
+
     fun submitSearch(query: String) {
         val q = query.trim()
+        if (q.isEmpty()) return
         _searchQuery.value = q
         val match = resolveSearchLocation(q) ?: return
-        focusOnLocation(match)
+        pickFromSearch(match)
+    }
+
+    /** 搜索选中：定位地图，展开详情卡，清空导航栏，并收起搜索栏 */
+    fun pickFromSearch(location: Location) {
+        val target = cachedLocations.value.find { it.locationId == location.locationId } ?: location
+        _highlightedLocationId.value = target.locationId
+        selectLocation(target)
+        clearWalkRoute()
+        viewModelScope.launch {
+            _events.emit(MapEvent.FocusLocation(target))
+            _events.emit(MapEvent.DismissSearchUi)
+        }
     }
 
     fun resolveSearchLocation(query: String): Location? =
@@ -343,4 +368,6 @@ class MapViewModel @Inject constructor(
 sealed class MapEvent {
     data class ShowBottomSheet(val location: Location) : MapEvent()
     data class FocusLocation(val location: Location) : MapEvent()
+    data object HideBottomSheet : MapEvent()
+    data object DismissSearchUi : MapEvent()
 }

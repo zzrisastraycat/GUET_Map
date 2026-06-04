@@ -47,7 +47,16 @@ class MainActivity : AppCompatActivity() {
                     tabId ?: return@collectLatest
                     val consumed = mainNavViewModel.consumeTabRequest()
                     if (consumed != null && navController.currentDestination?.id != consumed) {
-                        binding.bottomNavigation.selectedItemId = consumed
+                        val menu = binding.bottomNavigation.menu
+                        if (menu.findItem(consumed) != null) {
+                            binding.bottomNavigation.selectedItemId = consumed
+                        } else {
+                            try {
+                                navController.navigate(consumed)
+                            } catch (_: Exception) {
+                                // 如果导航失败（目的地可能不存在于 navGraph），忽略以避免二次崩溃
+                            }
+                        }
                     }
                 }
             }
