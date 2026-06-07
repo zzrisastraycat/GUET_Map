@@ -19,13 +19,34 @@
 
     </FrameLayout>
 
+    <!-- Weather / safety banner -->
+    <androidx.cardview.widget.CardView
+        android:id="@+id/cardWeatherSafety"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="16dp"
+        android:layout_marginTop="12dp"
+        android:layout_marginEnd="16dp"
+        app:cardCornerRadius="16dp"
+        app:cardElevation="4dp">
+
+        <TextView
+            android:id="@+id/tvWeatherSafety"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:padding="12dp"
+            android:text="天气与安全提示"
+            android:textSize="13sp"
+            android:textColor="?attr/colorOnSurface" />
+    </androidx.cardview.widget.CardView>
+
     <!-- Floating search bar -->
     <androidx.cardview.widget.CardView
         android:id="@+id/cardSearch"
         android:layout_width="match_parent"
         android:layout_height="48dp"
         android:layout_marginStart="16dp"
-        android:layout_marginTop="12dp"
+        android:layout_marginTop="64dp"
         android:layout_marginEnd="16dp"
         app:cardCornerRadius="24dp"
         app:cardElevation="4dp">

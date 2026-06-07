@@ -6,6 +6,8 @@ import com.example.guet_map.local.entity.LocationEntity
 import com.example.guet_map.model.Location
 import com.example.guet_map.model.Resource
 import com.example.guet_map.network.ApiService
+import com.example.guet_map.util.CampusBuildingCatalog
+import com.example.guet_map.util.CampusDormitoryCatalog
 import com.example.guet_map.util.GuetCampusPoiLoader
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first

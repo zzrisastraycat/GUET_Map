@@ -4,11 +4,13 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import com.example.guet_map.local.dao.AccountDao
 import com.example.guet_map.local.dao.ContributeDraftDao
 import com.example.guet_map.local.dao.FavoriteDao
 import com.example.guet_map.local.dao.GuideStepDao
 import com.example.guet_map.local.dao.LocationDao
 import com.example.guet_map.local.dao.NotificationDao
+import com.example.guet_map.local.entity.AccountEntity
 import com.example.guet_map.local.entity.ContributeDraftEntity
 import com.example.guet_map.local.entity.FavoriteEntity
 import com.example.guet_map.local.entity.GuideStepEntity
@@ -21,9 +23,10 @@ import com.example.guet_map.local.entity.NotificationEntity
         LocationEntity::class,
         FavoriteEntity::class,
         NotificationEntity::class,
-        ContributeDraftEntity::class
+        ContributeDraftEntity::class,
+        AccountEntity::class
     ],
-    version = 13,
+    version = 14,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -33,6 +36,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun favoriteDao(): FavoriteDao
     abstract fun notificationDao(): NotificationDao
     abstract fun contributeDraftDao(): ContributeDraftDao
+    abstract fun accountDao(): AccountDao
 
     companion object {
         @Volatile

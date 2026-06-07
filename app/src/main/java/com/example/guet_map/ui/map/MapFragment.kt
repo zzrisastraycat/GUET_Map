@@ -17,6 +17,7 @@ import android.view.inputmethod.InputMethodManager
 import android.widget.ImageButton
 import android.widget.TextView
 import android.widget.Toast
+import androidx.core.view.isVisible
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.cardview.widget.CardView
 import androidx.core.content.ContextCompat
@@ -62,11 +63,24 @@ import coil.load
 import coil.transform.RoundedCornersTransformation
 import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URL
 
 @AndroidEntryPoint
 class MapFragment : Fragment() {
+
+    private enum class NavigationState {
+        Idle,
+        Planning,
+        Navigating,
+        NearArrival,
+        Arrived
+    }
 
     @Inject lateinit var authRepository: AuthRepository
     @Inject lateinit var userPrefs: UserPrefs
@@ -90,14 +104,30 @@ class MapFragment : Fragment() {
     private var navigationPanelBinding: LayoutNavigationPanelBinding? = null
     private var navigationTarget: Location? = null
 
+    // 兼容旧实现的引用，避免合并后编译失败
+    private var aMapRouteClient: AMapRouteClient? = null
+    private var aMapSearchClient: AMapSearchClient? = null
+    private var currentRouteResult: RouteResult? = null
+    private val poiMarkers = mutableListOf<com.amap.api.maps.model.Marker>()
+    private var hasAutoCenteredOnLocation: Boolean = false
+
     // 定位相关
-    private var aMapLocationClient: AMapLocationClient? = null
+    private lateinit var locationManager: LocationManager
+    private val locationListener = android.location.LocationListener { location ->
+        onLocationReceived(location)
+    }
     private var myLocationMarker: com.amap.api.maps.model.Marker? = null
     private var latestLocation: android.location.Location? = null
 
     private var latestGcjLatLng: LatLng? = null
     private var routePolyline: Polyline? = null
     private var navTargetForExternal: Location? = null
+    private var activeRouteDestination: LatLng? = null
+    private var activeRouteSummaryBase: String = ""
+    private var activeRoutePoints: List<LatLng> = emptyList()
+    private var activeRouteInitialDistanceMeters: Int = 0
+    private var activeRouteInitialDurationSeconds: Int = 0
+    private var navigationState: NavigationState = NavigationState.Idle
 
     // 搜索相关
     private var cardSearchResults: androidx.cardview.widget.CardView? = null
@@ -164,10 +194,13 @@ class MapFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
+        locationManager = requireContext().getSystemService(LocationManager::class.java)
+
         setupBottomSheet()
         setupNavigationPanel()
         setupLocationDetail()
         setupFilterTags()
+        setupWeatherSafetyBanner()
         setupSearchBar()
         setupSearch()
         setupMyLocationButton()
@@ -200,6 +233,7 @@ class MapFragment : Fragment() {
     override fun onDestroyView() {
         super.onDestroyView()
 
+        stopSystemLocation()
         stopSystemLocation()
         if (mapViewCreated) {
             binding.mapView.onDestroy()
@@ -433,24 +467,36 @@ class MapFragment : Fragment() {
         }
     }
 
-    // ── 高德定位 ──────────────────────────────────────────────────
+    // ── 系统定位 ──────────────────────────────────────────────────
 
     /**
-     * 初始化并启动高德定位
+     * 初始化并启动系统定位
      */
     private fun initAndStartAmapLocation() {
-        aMapLocationClient = AMapLocationClient(requireContext())
-
-        aMapLocationClient?.onLocationResult = { amapLocation ->
-            onAmapLocationReceived(amapLocation)
-        }
-
-        // 错误不提示，静默重试
-        aMapLocationClient?.onLocationError = { _, _ -> }
-
-        aMapLocationClient?.start()
+        startSystemLocation()
     }
 
+    private fun startSystemLocation() {
+        try {
+            val providers = locationManager.getProviders(true)
+            if (providers.isNullOrEmpty()) {
+                Toast.makeText(requireContext(), "当前无法获取自身定位", Toast.LENGTH_SHORT).show()
+                return
+            }
+            for (provider in providers) {
+                locationManager.requestLocationUpdates(
+                    provider,
+                    2000L,
+                    5f,
+                    locationListener
+                )
+            }
+        } catch (e: SecurityException) {
+            Toast.makeText(requireContext(), "缺少定位权限，无法获取当前位置", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            Toast.makeText(requireContext(), "定位启动失败: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
+        }
+    }
 
     private fun onLocationReceived(location: android.location.Location) {
         val gcj = com.example.guet_map.util.CoordinateUtil.wgs84ToGcj02(
@@ -477,11 +523,20 @@ class MapFragment : Fragment() {
             myLocationMarker?.position = latLng
         }
 
+        updateNavigationProgress(latLng)
+
         // 首次定位成功且未手动移动地图时，自动居中一次
-        if (!hasAutoCenteredOnLocation && amapLocation.accuracy < 50) {
+        if (!hasAutoCenteredOnLocation && location.accuracy < 50f) {
             hasAutoCenteredOnLocation = true
             val update = com.amap.api.maps.CameraUpdateFactory.newLatLngZoom(latLng, 17f)
             map.animateCamera(update, 500, null)
+        }
+    }
+
+    private fun stopSystemLocation() {
+        try {
+            locationManager.removeUpdates(locationListener)
+        } catch (_: Exception) {
         }
     }
 
@@ -509,6 +564,139 @@ class MapFragment : Fragment() {
             requestLocationPermissionIfNeeded()
             Toast.makeText(requireContext(), "正在获取位置…", Toast.LENGTH_SHORT).show()
         }
+    }
+
+    private fun updateNavigationProgress(current: LatLng) {
+        val destination = activeRouteDestination ?: return
+        val distanceMeters = haversineMeters(current, destination)
+        val hintView = binding.root.findViewById<TextView>(R.id.tvRouteStepHint) ?: return
+        val etaView = binding.root.findViewById<TextView>(R.id.tvRouteEta)
+        val weatherView = binding.root.findViewById<TextView>(R.id.tvWeatherSafety)
+
+        val remainingMinutes = estimateRemainingMinutes(distanceMeters)
+        val congestion = routeTrafficWarning()
+        val weatherState = weatherSafetyBaseMessage()
+
+        if (distanceMeters <= 30) {
+            navigationState = NavigationState.Arrived
+            hintView.text = "已到达目的地 ${navTargetForExternal?.name ?: ""}"
+            binding.root.findViewById<TextView>(R.id.tvRouteSummary)?.text =
+                "到达目的地，导航已结束"
+            etaView?.text = "预计时间：0 分钟"
+            binding.root.findViewById<View>(R.id.progressRoute)?.visibility = View.GONE
+            weatherView?.text = "$weatherState · 已到达目的地，祝您一路平安"
+            return
+        }
+
+        navigationState = if (distanceMeters <= 100) NavigationState.NearArrival else NavigationState.Navigating
+        val nextStep = findNextRouteStep(current, activeRoutePoints)
+        hintView.text = when (navigationState) {
+            NavigationState.NearArrival -> {
+                if (nextStep != null) {
+                    "即将到达：${nextStep.second}，前方约 ${nextStep.first} 米${congestion.postfix}"
+                } else {
+                    "即将到达：目标就在附近，剩余约 ${distanceMeters} 米${congestion.postfix}"
+                }
+            }
+            else -> {
+                if (nextStep != null) {
+                    "导航中：${nextStep.second}，前方约 ${nextStep.first} 米${congestion.postfix}"
+                } else {
+                    "导航中：沿蓝色路线继续前进，目标还剩约 ${distanceMeters} 米${congestion.postfix}"
+                }
+            }
+        }
+
+        val summary = when (navigationState) {
+            NavigationState.NearArrival -> "$activeRouteSummaryBase · 即将到达"
+            else -> if (congestion.warning.isNullOrBlank()) activeRouteSummaryBase else "$activeRouteSummaryBase · ${congestion.warning}"
+        }
+        binding.root.findViewById<TextView>(R.id.tvRouteSummary)?.text = summary
+        etaView?.text = "预计时间：${remainingMinutes} 分钟"
+        weatherView?.text = buildNavigationWeatherText(weatherState, congestion.warning)
+    }
+
+    private fun buildNavigationWeatherText(base: String, trafficWarning: String?): String {
+        val suffix = when (navigationState) {
+            NavigationState.Planning -> "正在规划路线，请稍候"
+            NavigationState.Navigating -> "导航中，请留意路线"
+            NavigationState.NearArrival -> "即将到达，请减速慢行"
+            NavigationState.Arrived -> "导航完成，祝您一路平安"
+            NavigationState.Idle -> ""
+        }
+        val traffic = trafficWarning?.takeIf { it.isNotBlank() }
+        return listOfNotNull(base.takeIf { it.isNotBlank() }, traffic, suffix.takeIf { it.isNotBlank() })
+            .joinToString(" · ")
+    }
+
+    private fun weatherSafetyBaseMessage(): String {
+        val lat = latestLocation?.latitude ?: CampusGeo.CENTER_LAT
+        val lng = latestLocation?.longitude ?: CampusGeo.CENTER_LNG
+        val weather = fetchOpenMeteoWeather(lat, lng)
+        return when {
+            weather == null -> getString(R.string.weather_unknown)
+            weather.isRainy -> getString(R.string.weather_rain_warning)
+            weather.temperatureC <= 0.0 -> getString(R.string.weather_cold_warning)
+            else -> getString(R.string.weather_clear)
+        }
+    }
+
+    private data class TrafficWarning(val warning: String?, val postfix: String)
+
+    private fun estimateRemainingMinutes(distanceMeters: Int): Int {
+        val initialDistance = activeRouteInitialDistanceMeters.coerceAtLeast(1)
+        val initialDurationMinutes = (activeRouteInitialDurationSeconds / 60.0).coerceAtLeast(1.0)
+        val ratio = (distanceMeters.toDouble() / initialDistance.toDouble()).coerceIn(0.0, 1.0)
+        return (initialDurationMinutes * ratio).toInt().coerceAtLeast(1)
+    }
+
+    private fun routeTrafficWarning(): TrafficWarning {
+        val distance = latestGcjLatLng?.let { current ->
+            activeRouteDestination?.let { haversineMeters(current, it) }
+        } ?: return TrafficWarning(null, "")
+        return when {
+            distance > 500 -> TrafficWarning(null, "")
+            distance > 200 -> TrafficWarning("前方路段可能较忙，注意避让行人", "，注意前方路况")
+            else -> TrafficWarning("接近目的地，请减速慢行", "，即将到达")
+        }
+    }
+
+    private fun findNextRouteStep(current: LatLng, points: List<LatLng>): Pair<Int, String>? {
+        if (points.size < 2) return null
+        var nearestIndex = -1
+        var nearestDistance = Int.MAX_VALUE
+        points.forEachIndexed { index, point ->
+            val d = haversineMeters(current, point)
+            if (d < nearestDistance) {
+                nearestDistance = d
+                nearestIndex = index
+            }
+        }
+        if (nearestIndex < 0 || nearestIndex >= points.lastIndex) return null
+        val nextPoint = points[(nearestIndex + 1).coerceAtMost(points.lastIndex)]
+        val nextNextPoint = points[(nearestIndex + 2).coerceAtMost(points.lastIndex)]
+        val stepDistance = haversineMeters(current, nextPoint).coerceAtLeast(1)
+        val direction = when {
+            stepDistance <= 20 -> "继续前行"
+            kotlin.math.abs(nextNextPoint.latitude - nextPoint.latitude) > kotlin.math.abs(nextNextPoint.longitude - nextPoint.longitude) ->
+                if (nextNextPoint.latitude > nextPoint.latitude) "前方左转后向北" else "前方右转后向南"
+            else -> if (nextNextPoint.longitude > nextPoint.longitude) "前方右转后向东" else "前方左转后向西"
+        }
+        return stepDistance to direction
+    }
+
+    private fun haversineMeters(a: LatLng, b: LatLng): Int {
+        val earthRadius = 6371000.0
+        val dLat = Math.toRadians(b.latitude - a.latitude)
+        val dLng = Math.toRadians(b.longitude - a.longitude)
+        val lat1 = Math.toRadians(a.latitude)
+        val lat2 = Math.toRadians(b.latitude)
+        val sinLat = kotlin.math.sin(dLat / 2)
+        val sinLng = kotlin.math.sin(dLng / 2)
+        val c = 2 * kotlin.math.asin(
+            kotlin.math.sqrt(sinLat * sinLat + kotlin.math.cos(lat1) * kotlin.math.cos(lat2) * sinLng * sinLng)
+        )
+        return (earthRadius * c).toInt()
     }
 
     // ── ViewModel observers ─────────────────────────────────────────
@@ -563,7 +751,16 @@ class MapFragment : Fragment() {
                 // 选中的地点信息更新
                 launch {
                     viewModel.selectedLocation.collect { location ->
-                        location?.let { updateSheetHeader(it) }
+                        location?.let {
+                            updateSheetHeader(it)
+                            updateLocalGuidePreview()
+                        }
+                    }
+                }
+
+                launch {
+                    viewModel.localGuideSteps.collectLatest { steps ->
+                        updateLocalGuidePreview(steps)
                     }
                 }
 
@@ -621,6 +818,10 @@ class MapFragment : Fragment() {
         binding.root.findViewById<View>(R.id.btnClearRoute)?.setOnClickListener {
             viewModel.clearWalkRoute()
         }
+        binding.root.findViewById<View>(R.id.cardWalkNav)?.setOnClickListener {
+            val loc = navTargetForExternal ?: currentSheetLocation ?: return@setOnClickListener
+            startCampusWalkNavigation(loc)
+        }
         binding.root.findViewById<View>(R.id.btnOpenAmapNavi)?.setOnClickListener {
             navTargetForExternal?.let { openAmapExternalNavigation(it) }
         }
@@ -629,6 +830,9 @@ class MapFragment : Fragment() {
     private fun showWalkRouteOnMap(route: com.example.guet_map.model.WalkRouteInfo) {
         val map = aMap ?: return
         clearWalkRouteFromMap()
+        activeRoutePoints = route.polyline
+        activeRouteInitialDistanceMeters = route.distanceMeters
+        activeRouteInitialDurationSeconds = route.durationSeconds
         routePolyline = map.addPolyline(
             PolylineOptions()
                 .addAll(route.polyline)
@@ -636,15 +840,21 @@ class MapFragment : Fragment() {
                 .color(ContextCompat.getColor(requireContext(), R.color.primary))
         )
         val minutes = (route.durationSeconds / 60).coerceAtLeast(1)
+        activeRouteSummaryBase = getString(
+            R.string.route_summary_format,
+            route.targetName,
+            route.distanceMeters,
+            minutes
+        )
         binding.root.findViewById<android.widget.TextView>(R.id.tvRouteSummary)?.text =
-            getString(
-                R.string.route_summary_format,
-                route.targetName,
-                route.distanceMeters,
-                minutes
-            )
+            activeRouteSummaryBase
+        binding.root.findViewById<TextView>(R.id.tvRouteEta)?.text =
+            "预计时间：${minutes} 分钟"
         binding.root.findViewById<View>(R.id.cardWalkNav)?.visibility = View.VISIBLE
         binding.root.findViewById<View>(R.id.progressRoute)?.visibility = View.GONE
+        binding.root.findViewById<TextView>(R.id.tvRouteHint)?.visibility = View.VISIBLE
+        binding.root.findViewById<TextView>(R.id.tvRouteStepHint)?.text =
+            "导航中：沿蓝色路线前往 ${route.targetName}"
 
         val builder = LatLngBounds.builder()
         route.polyline.forEach { builder.include(it) }
@@ -657,33 +867,23 @@ class MapFragment : Fragment() {
         binding.root.findViewById<View>(R.id.cardWalkNav)?.visibility = View.GONE
     }
 
-    private fun showNavigationOptions(location: Location) {
-        navTargetForExternal = location
-        MaterialAlertDialogBuilder(requireContext())
-            .setTitle(R.string.nav_choose_title)
-            .setItems(
-                arrayOf(
-                    getString(R.string.nav_campus_walk),
-                    getString(R.string.nav_amap_app)
-                )
-            ) { _, which ->
-                when (which) {
-                    0 -> startCampusWalkNavigation(location)
-                    1 -> openAmapExternalNavigation(location)
-                }
-            }
-            .show()
-    }
-
     private fun startCampusWalkNavigation(location: Location) {
+        navTargetForExternal = location
         val start = latestGcjLatLng ?: viewModel.campusCenterLatLng().also {
             Toast.makeText(requireContext(), R.string.route_no_location, Toast.LENGTH_SHORT).show()
         }
+        activeRouteDestination = LatLng(location.latitude, location.longitude)
+        navigationState = NavigationState.Planning
         binding.root.findViewById<View>(R.id.cardWalkNav)?.visibility = View.VISIBLE
         binding.root.findViewById<android.widget.TextView>(R.id.tvRouteTitle)?.text =
             getString(R.string.campus_walk_route)
         binding.root.findViewById<android.widget.TextView>(R.id.tvRouteSummary)?.text =
             getString(R.string.route_planning)
+        binding.root.findViewById<TextView>(R.id.tvRouteEta)?.text = "预计时间：计算中…"
+        binding.root.findViewById<android.widget.TextView>(R.id.tvRouteStepHint)?.text =
+            "正在为 ${location.name} 规划步行路线…"
+        binding.root.findViewById<TextView>(R.id.tvWeatherSafety)?.text =
+            "天气提示：正在同步中…"
         viewModel.planWalkRouteTo(location, start)
     }
 
@@ -784,12 +984,109 @@ class MapFragment : Fragment() {
         updateFavoriteButton(viewModel.favoriteIds.value)
     }
 
+    private fun updateLocalGuidePreview(steps: List<GuideStep>? = null) {
+        val preview = binding.root.findViewById<TextView>(R.id.tvLocalGuidePreview) ?: return
+        val displaySteps = steps ?: viewModel.localGuideSteps.value
+        if (displaySteps.isEmpty()) {
+            preview.text = "暂无本地提交的路线步骤，提交后会显示在这里"
+            preview.visibility = View.VISIBLE
+            return
+        }
+        val text = buildString {
+            append("已提交路线步骤\n")
+            displaySteps.take(4).forEach { step ->
+                append("${step.stepNumber}. ${step.description}")
+                if (step.imageUrl.isNotBlank()) append("（含图片）")
+                appendLine()
+            }
+        }.trimEnd()
+        preview.text = text
+        preview.visibility = View.VISIBLE
+    }
+
     private fun showLocationDetail(location: Location) {
         updateSheetHeader(location)
         bottomSheetBehavior.state = BottomSheetBehavior.STATE_EXPANDED
     }
 
     // ── BottomSheet setup ────────────────────────────────────────────
+
+    private fun setupWeatherSafetyBanner() {
+        binding.cardWeatherSafety.setOnClickListener {
+            refreshWeatherSafetyBanner()
+        }
+        refreshWeatherSafetyBanner()
+    }
+
+    private fun refreshWeatherSafetyBanner() {
+        val banner = binding.tvWeatherSafety
+        banner.text = getString(R.string.weather_loading)
+        viewLifecycleOwner.lifecycleScope.launch {
+            val message = withContext(Dispatchers.IO) {
+                fetchWeatherSafetyMessage()
+            }
+            if (_binding != null) {
+                banner.text = message
+                binding.cardWeatherSafety.isVisible = true
+            }
+        }
+    }
+
+    private fun fetchWeatherSafetyMessage(): String {
+        val lat = latestLocation?.latitude ?: CampusGeo.CENTER_LAT
+        val lng = latestLocation?.longitude ?: CampusGeo.CENTER_LNG
+        val weather = fetchOpenMeteoWeather(lat, lng)
+        val weatherMsg = when {
+            weather == null -> getString(R.string.weather_unknown)
+            weather.isRainy -> getString(R.string.weather_rain_warning)
+            weather.temperatureC <= 0.0 -> getString(R.string.weather_cold_warning)
+            else -> getString(R.string.weather_clear)
+        }
+        val trafficMsg = routeTrafficBannerMessage()
+        return if (trafficMsg.isBlank()) weatherMsg else "$weatherMsg · $trafficMsg"
+    }
+
+    private fun routeTrafficBannerMessage(): String {
+        val current = latestGcjLatLng ?: return ""
+        val destination = activeRouteDestination ?: return ""
+        val distance = haversineMeters(current, destination)
+        return when {
+            distance > 500 -> ""
+            distance > 200 -> "导航提示：前方路段可能较忙"
+            else -> "导航提示：接近目的地，请减速慢行"
+        }
+    }
+
+    private data class WeatherSnapshot(
+        val temperatureC: Double,
+        val isRainy: Boolean
+    )
+
+    private fun fetchOpenMeteoWeather(lat: Double, lng: Double): WeatherSnapshot? {
+        val url = URL("https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lng&current=temperature_2m,precipitation,weather_code&timezone=auto")
+        val connection = (url.openConnection() as HttpURLConnection).apply {
+            connectTimeout = 4000
+            readTimeout = 4000
+            requestMethod = "GET"
+        }
+        return try {
+            connection.inputStream.use { input ->
+                val text = input.bufferedReader().readText()
+                val current = JSONObject(text).optJSONObject("current") ?: return null
+                val temperature = current.optDouble("temperature_2m", Double.NaN)
+                val code = current.optInt("weather_code", -1)
+                if (temperature.isNaN()) return null
+                WeatherSnapshot(
+                    temperatureC = temperature,
+                    isRainy = code in setOf(51, 53, 55, 61, 63, 65, 80, 81, 82, 95, 96, 99)
+                )
+            }
+        } catch (_: Exception) {
+            null
+        } finally {
+            connection.disconnect()
+        }
+    }
 
     private fun setupBottomSheet() {
         bottomSheetBehavior = BottomSheetBehavior.from(binding.bottomSheet)
@@ -970,7 +1267,6 @@ class MapFragment : Fragment() {
         root.findViewById<View>(R.id.btnNavigate)?.setOnClickListener {
 
             val loc = currentSheetLocation ?: return@setOnClickListener
-            navTargetForExternal = loc
             startCampusWalkNavigation(loc)
         }
         btnFavorite?.setOnClickListener {
@@ -994,8 +1290,7 @@ class MapFragment : Fragment() {
         }
     }
 
-
-  
+    /**
      * 开始导航
      * 从当前位置导航到选中的地点
      */
@@ -1025,7 +1320,7 @@ class MapFragment : Fragment() {
             destLng = target.longitude
         )
         Toast.makeText(requireContext(), "正在规划路线...", Toast.LENGTH_SHORT).show()
-    } // 注意：帮你补上了这个缺失的右括号
+    }
 
     // 修复崩溃1：ActivityNotFoundException - 改进导航Intent处理
     private fun openAmapExternalNavigation(location: Location) {
@@ -1167,7 +1462,12 @@ class MapFragment : Fragment() {
             ) {
                 val q = binding.etSearch.text?.toString().orEmpty()
                 if (q.isNotBlank()) {
-                    viewModel.submitSearch(q)
+                    val resolved = viewModel.resolveSearchLocation(q)
+                    if (resolved != null) {
+                        viewModel.pickFromSearch(resolved)
+                    } else {
+                        viewModel.submitSearch(q)
+                    }
                 }
                 true
             } else {

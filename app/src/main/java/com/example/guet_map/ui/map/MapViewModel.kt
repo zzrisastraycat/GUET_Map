@@ -29,6 +29,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -109,6 +110,9 @@ class MapViewModel @Inject constructor(
     private val _guideStepsResource = MutableStateFlow<Resource<List<GuideStep>>>(Resource.Loading)
     val guideStepsResource: StateFlow<Resource<List<GuideStep>>> = _guideStepsResource.asStateFlow()
 
+    private val _localGuideSteps = MutableStateFlow<List<GuideStep>>(emptyList())
+    val localGuideSteps: StateFlow<List<GuideStep>> = _localGuideSteps.asStateFlow()
+
     private val _selectedLocation = MutableStateFlow<Location?>(null)
     val selectedLocation: StateFlow<Location?> = _selectedLocation.asStateFlow()
 
@@ -143,8 +147,15 @@ class MapViewModel @Inject constructor(
         val q = query.trim()
         if (q.isEmpty()) return
         _searchQuery.value = q
-        val match = resolveSearchLocation(q) ?: return
-        pickFromSearch(match)
+
+        val exactMatch = resolveSearchLocation(q)
+        val bestVisibleMatch = CampusSearchMatcher.resolveBest(searchResults.value, q)
+        val firstVisibleMatch = searchResults.value.firstOrNull()
+        val match = exactMatch ?: bestVisibleMatch ?: firstVisibleMatch
+
+        if (match != null) {
+            pickFromSearch(match)
+        }
     }
 
     /** 搜索选中：定位地图，展开详情卡，清空导航栏，并收起搜索栏 */
@@ -223,6 +234,7 @@ class MapViewModel @Inject constructor(
     /** 选择地点 → 加载指引并展开 BottomSheet */
     fun selectLocation(location: Location) {
         _selectedLocation.value = location
+        observeLocalGuideSteps(location.locationId)
         if (location.hasGuide) {
             loadGuideSteps(location.locationId)
         } else {
@@ -230,6 +242,14 @@ class MapViewModel @Inject constructor(
         }
         viewModelScope.launch {
             _events.emit(MapEvent.ShowBottomSheet(location))
+        }
+    }
+
+    private fun observeLocalGuideSteps(locationId: String) {
+        viewModelScope.launch {
+            guideRepository.observeCachedGuideSteps(locationId).collect { steps ->
+                _localGuideSteps.value = steps
+            }
         }
     }
 

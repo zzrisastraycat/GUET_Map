@@ -5,6 +5,8 @@ import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.guet_map.data.UserPrefs
+import com.example.guet_map.local.dao.GuideStepDao
+import com.example.guet_map.local.entity.GuideStepEntity
 import com.example.guet_map.model.Location
 import com.example.guet_map.model.MyGuideSubmission
 import com.example.guet_map.model.Resource
@@ -34,7 +36,8 @@ class ContributeViewModel @Inject constructor(
     private val apiService: ApiService,
     private val locationRepository: LocationRepository,
     private val userPrefs: UserPrefs,
-    private val draftRepository: ContributeDraftRepository
+    private val draftRepository: ContributeDraftRepository,
+    private val guideStepDao: GuideStepDao
 ) : ViewModel() {
 
     init {
@@ -182,34 +185,28 @@ class ContributeViewModel @Inject constructor(
 
         viewModelScope.launch {
             _uploadState.value = UploadUiState.Loading
-
             try {
-                var totalPoints = 0
-                for (step in filledSteps) {
-                    val imagePart = createImagePart(step)
-                    val response = apiService.uploadGuideStep(
-                        locationId = targetId.toRequestBody("text/plain".toMediaType()),
-                        stepNumber = step.stepNumber.toString()
-                            .toRequestBody("text/plain".toMediaType()),
-                        description = step.description
-                            .toRequestBody("text/plain".toMediaType()),
-                        image = imagePart
+                val entities = filledSteps.map { step ->
+                    GuideStepEntity(
+                        locationId = targetId,
+                        stepNumber = step.stepNumber,
+                        description = step.description,
+                        imageUrl = step.imageUri?.toString().orEmpty()
                     )
-                    if (response.success) {
-                        totalPoints += response.pointsAwarded
-                    }
                 }
+                guideStepDao.deleteByLocation(targetId)
+                guideStepDao.insertAll(entities)
 
-                userPrefs.addPoints(totalPoints)
+                userPrefs.addPoints(filledSteps.size * 2)
                 userPrefs.contributionCount = userPrefs.contributionCount + filledSteps.size
                 _userPoints.value = userPrefs.points
                 draftRepository.clearDraft()
-                val msg = "提交成功！获得 $totalPoints 积分，待审核通过后发放"
+                val msg = "提交成功！已立即生效"
                 _uploadState.value = UploadUiState.Success(msg)
                 LocalNotificationHelper.show(
                     context,
-                    "UGC 已提交",
-                    "您的指路步骤已提交审核，通过后将发放积分"
+                    "指路已生效",
+                    "您提交的路线步骤已保存，可在导航页直接查看"
                 )
 
                 _selectedLocationId.value = ""
@@ -217,7 +214,7 @@ class ContributeViewModel @Inject constructor(
                 _stepItems.value = listOf(StepFormItem(stepNumber = 1))
             } catch (e: Exception) {
                 _uploadState.value = UploadUiState.Error(
-                    "提交失败: ${e.localizedMessage ?: "网络不可用"}"
+                    "提交失败: ${e.localizedMessage ?: "本地保存失败"}"
                 )
             }
         }

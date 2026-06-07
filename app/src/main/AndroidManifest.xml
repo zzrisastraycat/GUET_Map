@@ -32,9 +32,10 @@
         tools:targetApi="35">
 
         <!-- 高德地图 API Key (替换为你的实际 Key) -->
+        ，
         <meta-data
             android:name="com.amap.api.v2.apikey"
-            android:value="5271720bca97f691ddce5f80cbeccb37" />
+            android:value="c2f63f64da793bcba817e0e3767603dc" />
 
         <provider
             android:name="androidx.core.content.FileProvider"

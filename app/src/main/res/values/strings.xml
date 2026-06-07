@@ -47,4 +47,9 @@
     <string name="route_planning">正在规划路线…</string>
     <string name="route_no_location">未获取定位，从校区中心为您规划</string>
     <string name="route_summary_format">前往 %1$s · 约 %2$d 米 · 步行 %3$d 分钟</string>
+    <string name="weather_loading">正在获取天气与安全提示…</string>
+    <string name="weather_clear">当前天气适宜出行</string>
+    <string name="weather_rain_warning">今天有降雨，路面湿滑，请小心慢行</string>
+    <string name="weather_cold_warning">气温较低，请注意保暖与防滑</string>
+    <string name="weather_unknown">天气数据暂不可用</string>
 </resources>

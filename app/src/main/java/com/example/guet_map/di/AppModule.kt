@@ -2,6 +2,7 @@ package com.example.guet_map.di
 
 import com.example.guet_map.BuildConfig
 import com.example.guet_map.local.AppDatabase
+import com.example.guet_map.local.dao.AccountDao
 import com.example.guet_map.local.dao.ContributeDraftDao
 import com.example.guet_map.local.dao.FavoriteDao
 import com.example.guet_map.local.dao.GuideStepDao
@@ -85,4 +86,7 @@ object AppModule {
     @Provides
     fun provideContributeDraftDao(database: AppDatabase): ContributeDraftDao =
         database.contributeDraftDao()
+
+    @Provides
+    fun provideAccountDao(database: AppDatabase): AccountDao = database.accountDao()
 }

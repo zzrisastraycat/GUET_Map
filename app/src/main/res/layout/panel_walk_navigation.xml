@@ -49,6 +49,34 @@
             android:textColor="?attr/colorOnSurfaceVariant"
             android:textSize="14sp" />
 
+        <TextView
+            android:id="@+id/tvRouteEta"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:textColor="?attr/colorPrimary"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:text="预计时间：-- 分钟" />
+
+        <TextView
+            android:id="@+id/tvRouteHint"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:textColor="?attr/colorPrimary"
+            android:textSize="13sp"
+            android:text="路线已生成，可点击高德语音导航开始导航" />
+
+        <TextView
+            android:id="@+id/tvRouteStepHint"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:textColor="?attr/colorOnSurfaceVariant"
+            android:textSize="13sp"
+            android:text="导航提示：沿当前路线前往目标地点" />
+
         <ProgressBar
             android:id="@+id/progressRoute"
             style="?android:attr/progressBarStyleSmall"
