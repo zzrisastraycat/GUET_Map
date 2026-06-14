@@ -102,36 +102,37 @@ object CampusBuildingCatalog {
         add("桂电花江教学楼")
     }
 
-    suspend fun mergeInto(existing: List<Location>): List<Location> {
+    fun mergeInto(existing: List<Location>): List<Location> {
         val amapPois = existing.filter { loc ->
             !CampusBuildingNumbers.shouldDropAmapTeachingPoi(loc.name)
         }
-        val hasTrustedAmap = amapPois.any { CampusPoiNames.isTrustedAmapName(it.name) }
         val result = amapPois.toMutableList()
 
-        if (!hasTrustedAmap) {
-            for (entry in allEntries) {
-                val idNum = entry.locationId.removePrefix("building_").toIntOrNull()
-                    ?: entry.locationId.removePrefix("building_").takeWhile { it.isDigit() }.toIntOrNull()
-                val hasAnyForBuilding = idNum != null && result.any { loc ->
-                    CampusBuildingNumbers.parse(loc.name) == idNum
-                }
-                if (!hasAnyForBuilding) {
-                    result.add(locationFromEntry(entry))
-                }
-            }
-        } else {
-            for (entry in extraCampusPlaces) {
-                val already = result.any { loc ->
-                    CampusPoiNames.isTrustedAmapName(loc.name) && entry.matchesLocation(loc)
-                }
-                if (!already && result.none { it.locationId == entry.locationId }) {
-                    result.add(locationFromEntry(entry))
-                }
-            }
+        for (entry in teachingBuildings) {
+            if (entryAlreadyPresent(result, entry)) continue
+            result.add(locationFromEntry(entry))
+        }
+
+        for (entry in extraCampusPlaces) {
+            if (entryAlreadyPresent(result, entry)) continue
+            result.add(locationFromEntry(entry))
         }
 
         return result.sortedBy { it.name }
+    }
+
+    private fun entryAlreadyPresent(result: List<Location>, entry: BuildingEntry): Boolean {
+        if (result.any { it.locationId == entry.locationId }) return true
+        if (result.any { entry.matchesLocation(it) }) return true
+        val idNum = entry.locationId.removePrefix("building_").toIntOrNull()
+            ?: entry.locationId.removePrefix("building_").takeWhile { it.isDigit() }.toIntOrNull()
+        if (idNum != null) {
+            return result.any { loc ->
+                CampusBuildingNumbers.parse(loc.name) == idNum ||
+                    loc.locationId == "building_$idNum"
+            }
+        }
+        return false
     }
 
     /** Mock API 离线兜底数据 */

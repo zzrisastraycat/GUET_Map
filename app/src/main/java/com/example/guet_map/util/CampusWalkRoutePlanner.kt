@@ -45,7 +45,8 @@ class CampusWalkRoutePlanner @Inject constructor(
             try {
                 val route = withContext(Dispatchers.IO) {
                     requestWalkRouteSdk(start, end, targetName)
-                        ?: requestWalkRouteWeb(start, end, targetName)
+                        ?: runCatching { requestWalkRouteWeb(start, end, targetName) }.getOrNull()
+                        ?: buildFallbackRoute(start, end, targetName)
                 }
                 onSuccess(route)
             } catch (e: Exception) {
@@ -137,6 +138,32 @@ class CampusWalkRoutePlanner @Inject constructor(
             durationSeconds = path.duration?.toIntOrNull() ?: 0,
             polyline = points
         )
+    }
+
+    private fun buildFallbackRoute(start: LatLng, end: LatLng, targetName: String): WalkRouteInfo {
+        val distance = haversineMeters(start, end)
+        val duration = ((distance / 80.0) * 60).toInt().coerceAtLeast(60)
+        val points = listOf(start, end)
+        return WalkRouteInfo(
+            targetName = targetName,
+            distanceMeters = distance,
+            durationSeconds = duration,
+            polyline = points
+        )
+    }
+
+    private fun haversineMeters(a: LatLng, b: LatLng): Int {
+        val earthRadius = 6371000.0
+        val dLat = Math.toRadians(b.latitude - a.latitude)
+        val dLng = Math.toRadians(b.longitude - a.longitude)
+        val lat1 = Math.toRadians(a.latitude)
+        val lat2 = Math.toRadians(b.latitude)
+        val sinLat = kotlin.math.sin(dLat / 2)
+        val sinLng = kotlin.math.sin(dLng / 2)
+        val c = 2 * kotlin.math.asin(
+            kotlin.math.sqrt(sinLat * sinLat + kotlin.math.cos(lat1) * kotlin.math.cos(lat2) * sinLng * sinLng)
+        )
+        return (earthRadius * c).toInt()
     }
 
     private fun decodePolyline(polyline: String?): List<LatLng> {

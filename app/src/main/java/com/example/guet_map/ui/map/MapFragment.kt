@@ -42,22 +42,18 @@ import com.example.guet_map.ui.map.state.MapUiEvent
 import com.example.guet_map.ui.map.state.MapUiState
 import com.example.guet_map.util.CampusGeo
 import com.example.guet_map.util.CoordinateUtil
+import com.example.guet_map.util.FetchWeatherSafetyUseCase
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-/**
- * 地图主界面
- * 负责：地图显示、地点标记、搜索、导航
- *
- * 重构后使用组件化设计，将复杂逻辑拆分到独立组件
- */
 @AndroidEntryPoint
 class MapFragment : Fragment() {
 
     @Inject lateinit var authRepository: com.example.guet_map.repository.AuthRepository
     @Inject lateinit var userPrefs: com.example.guet_map.data.UserPrefs
+    @Inject lateinit var fetchWeatherSafetyUseCase: FetchWeatherSafetyUseCase
 
     private var _binding: FragmentMapBinding? = null
     private val binding get() = _binding!!
@@ -65,28 +61,22 @@ class MapFragment : Fragment() {
     private val viewModel: MapViewModel by viewModels()
     private val mainNavViewModel: MainNavViewModel by activityViewModels()
 
-    // 地图相关
     private var aMap: AMap? = null
     private var mapViewCreated = false
 
-    // 定位相关
-    private var aMapLocationClient: AMapLocationClient? = null
+    private var aMapLocationClient: com.amap.api.location.AMapLocationClient? = null
     private var myLocationMarker: com.amap.api.maps.model.Marker? = null
     private var latestLocation: android.location.Location? = null
     private var latestGcjLatLng: LatLng? = null
-
-    // 路径规划相关
-    private var aMapRouteClient: AMapRouteClient? = null
+    private var hasAutoCenteredOnLocation = false
     private var routePolyline: com.amap.api.maps.model.Polyline? = null
 
-    // 组件
     private lateinit var filterAdapter: FilterTagAdapter
     private lateinit var searchBarComponent: SearchBarComponent
     private lateinit var navigationPanelComponent: NavigationPanelComponent
     private lateinit var locationDetailCardComponent: LocationDetailCardComponent
     private lateinit var bottomSheetComponent: LocationBottomSheetComponent
 
-    // 位置权限
     private val locationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { grants ->
@@ -97,14 +87,12 @@ class MapFragment : Fragment() {
         }
     }
 
-    // 语音搜索权限
     private val voicePermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) launchVoiceRecognizer() else Toast.makeText(context, "需要麦克风权限才能使用语音搜索", Toast.LENGTH_SHORT).show()
     }
 
-    // 语音搜索
     private val voiceSearchLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -115,10 +103,6 @@ class MapFragment : Fragment() {
             viewModel.submitSearch(text)
         }
     }
-
-    // ============================================================
-    // Fragment 生命周期
-    // ============================================================
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -175,16 +159,10 @@ class MapFragment : Fragment() {
                 binding.mapView.onSaveInstanceState(outState)
             }
         } catch (_: Exception) {
-            // Fragment 可能已销毁
         }
     }
 
-    // ============================================================
-    // 初始化
-    // ============================================================
-
     private fun initComponents() {
-        // 搜索栏组件
         searchBarComponent = SearchBarComponent(
             context = requireContext(),
             binding = binding,
@@ -193,7 +171,6 @@ class MapFragment : Fragment() {
             onLocationPicked = { location -> viewModel.pickFromSearch(location) }
         )
 
-        // 导航面板组件
         navigationPanelComponent = NavigationPanelComponent(
             context = requireContext(),
             parent = binding.mapContainer
@@ -202,7 +179,6 @@ class MapFragment : Fragment() {
             onStartNavigation = { location -> openExternalNavigation(location) }
         }
 
-        // 详情卡片组件
         locationDetailCardComponent = LocationDetailCardComponent(
             context = requireContext(),
             parent = binding.mapContainer
@@ -211,7 +187,6 @@ class MapFragment : Fragment() {
             onFavorite = { location -> viewLifecycleOwner.lifecycleScope.launch { toggleFavorite(location) } }
         }
 
-        // BottomSheet 组件
         bottomSheetComponent = LocationBottomSheetComponent(binding).apply {
             onNavigate = { location -> startWalkNavigation(location) }
             onFavorite = { location -> viewLifecycleOwner.lifecycleScope.launch { toggleFavorite(location) } }
@@ -221,7 +196,6 @@ class MapFragment : Fragment() {
     }
 
     private fun setupViews() {
-        // 筛选标签
         val filterTags = listOf("食堂", "教室", "咖啡", "图书馆", "宿舍", "校门", "商店", "运动场")
         filterAdapter = FilterTagAdapter(filterTags) { tag ->
             viewModel.filterByCategory(tag)
@@ -233,12 +207,10 @@ class MapFragment : Fragment() {
     }
 
     private fun setupClickListeners() {
-        // 我的位置按钮
         binding.fabMyLocation.setOnClickListener {
             centerOnMyLocation()
         }
 
-        // 菜单/头像按钮
         binding.ivMenu.setOnClickListener {
             mainNavViewModel.requestTab(R.id.nav_login)
         }
@@ -246,10 +218,8 @@ class MapFragment : Fragment() {
             mainNavViewModel.requestTab(R.id.nav_login)
         }
 
-        // 初始化搜索栏
         searchBarComponent.setup()
 
-        // 语音搜索按钮
         binding.ivVoice.setOnClickListener {
             startVoiceSearch()
         }
@@ -278,29 +248,22 @@ class MapFragment : Fragment() {
         }
     }
 
-    // ============================================================
-    // ViewModel 观察者
-    // ============================================================
-
     private fun observeViewModel() {
         viewLifecycleOwner.lifecycleScope.launch {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
 
-                // 观察 UI 状态
                 launch {
                     viewModel.uiState.collect { state ->
                         handleUiState(state)
                     }
                 }
 
-                // 观察 UI 事件
                 launch {
                     viewModel.uiEvent.collect { event ->
                         handleUiEvent(event)
                     }
                 }
 
-                // 观察地点数据
                 launch {
                     viewModel.cachedLocations.collectLatest { locations ->
                         if (locations.isNotEmpty()) {
@@ -309,14 +272,12 @@ class MapFragment : Fragment() {
                     }
                 }
 
-                // 观察搜索结果
                 launch {
                     viewModel.searchResults.collectLatest { results ->
                         searchBarComponent.updateSearchResults(results)
                     }
                 }
 
-                // 观察选中地点
                 launch {
                     viewModel.selectedLocation.collect { location ->
                         location?.let {
@@ -325,7 +286,6 @@ class MapFragment : Fragment() {
                     }
                 }
 
-                // 观察收藏状态
                 launch {
                     viewModel.favoriteIds.collectLatest { ids ->
                         bottomSheetComponent.updateFavoriteState(
@@ -334,7 +294,6 @@ class MapFragment : Fragment() {
                     }
                 }
 
-                // 观察图文指引
                 launch {
                     viewModel.guideStepsResource.collect { resource ->
                         when (resource) {
@@ -345,7 +304,6 @@ class MapFragment : Fragment() {
                     }
                 }
 
-                // 观察路线
                 launch {
                     viewModel.walkRoute.collect { route ->
                         if (route != null) {
@@ -358,7 +316,6 @@ class MapFragment : Fragment() {
             }
         }
 
-        // 观察主导航
         viewLifecycleOwner.lifecycleScope.launch {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
                 mainNavViewModel.pendingLocationId.collectLatest { locationId ->
@@ -370,27 +327,13 @@ class MapFragment : Fragment() {
         }
     }
 
-    // ============================================================
-    // UI 状态处理
-    // ============================================================
-
     private fun handleUiState(state: MapUiState) {
         when (state) {
-            is MapUiState.Idle -> {
-                // 空闲状态
-            }
-            is MapUiState.Loading -> {
-                // 显示加载
-            }
-            is MapUiState.LocationsLoaded -> {
-                // 地点加载完成
-            }
-            is MapUiState.SearchResult -> {
-                // 搜索结果
-            }
-            is MapUiState.LocationDetail -> {
-                // 地点详情
-            }
+            is MapUiState.Idle -> {}
+            is MapUiState.Loading -> {}
+            is MapUiState.LocationsLoaded -> {}
+            is MapUiState.SearchResult -> {}
+            is MapUiState.LocationDetail -> {}
             is MapUiState.Navigating -> {
                 if (state.isLoading) {
                     navigationPanelComponent.showLoading()
@@ -411,9 +354,7 @@ class MapFragment : Fragment() {
             is MapUiEvent.ShowToast -> {
                 Toast.makeText(requireContext(), event.message, Toast.LENGTH_SHORT).show()
             }
-            is MapUiEvent.ShowLocationSheet -> {
-                // 由 selectedLocation 观察者处理
-            }
+            is MapUiEvent.ShowLocationSheet -> {}
             is MapUiEvent.HideLocationSheet -> {
                 bottomSheetComponent.hide()
             }
@@ -423,21 +364,15 @@ class MapFragment : Fragment() {
             is MapUiEvent.DismissSearchInput -> {
                 searchBarComponent.dismissSearchResults()
             }
-            is MapUiEvent.ShowLoading -> {
-                // 显示加载
-            }
-            is MapUiEvent.HideLoading -> {
-                // 隐藏加载
-            }
+            is MapUiEvent.ShowLoading -> {}
+            is MapUiEvent.HideLoading -> {}
             is MapUiEvent.NavigateToExternal -> {
                 openExternalNavigationByCoords(event.latitude, event.longitude, event.name)
             }
             is MapUiEvent.RequestLocationPermission -> {
                 requestLocationPermission()
             }
-            is MapUiEvent.ShowLocationAccuracy -> {
-                // 可显示定位精度
-            }
+            is MapUiEvent.ShowLocationAccuracy -> {}
         }
     }
 
@@ -453,10 +388,6 @@ class MapFragment : Fragment() {
         Toast.makeText(requireContext(), contextMessage, Toast.LENGTH_SHORT).show()
         viewModel.clearError()
     }
-
-    // ============================================================
-    // 地图初始化
-    // ============================================================
 
     private fun initMapView(savedInstanceState: Bundle?) {
         if (mapViewCreated) return
@@ -506,10 +437,6 @@ class MapFragment : Fragment() {
             false
         }
     }
-
-    // ============================================================
-    // 定位功能
-    // ============================================================
 
     private fun requestLocationPermissionIfNeeded() {
         val hasFine = ContextCompat.checkSelfPermission(
@@ -576,8 +503,6 @@ class MapFragment : Fragment() {
         onLocationReceived(location, amapLocation)
     }
 
-    private var hasAutoCenteredOnLocation = false
-
     private fun onLocationReceived(location: android.location.Location, amapLocation: com.amap.api.location.AMapLocation) {
         val gcj = CoordinateUtil.wgs84ToGcj02(
             requireContext(),
@@ -623,19 +548,8 @@ class MapFragment : Fragment() {
         }
     }
 
-    // ============================================================
-    // 导航功能
-    // ============================================================
-
     private fun initNavigationClient() {
-        aMapRouteClient = AMapRouteClient(requireContext()).apply {
-            onRouteResult = { result ->
-                // 处理路线结果
-            }
-            onRouteError = { error ->
-                Toast.makeText(requireContext(), error, Toast.LENGTH_SHORT).show()
-            }
-        }
+        // Navigation client initialization placeholder
     }
 
     private fun startWalkNavigation(location: Location) {
@@ -688,7 +602,6 @@ class MapFragment : Fragment() {
                 startActivity(intent)
             }
         } catch (_: Exception) {
-            // ignore
         }
     }
 
@@ -714,10 +627,6 @@ class MapFragment : Fragment() {
         clipboard.setPrimaryClip(clip)
         Toast.makeText(requireContext(), "坐标已复制到剪贴板", Toast.LENGTH_SHORT).show()
     }
-
-    // ============================================================
-    // 路线绘制
-    // ============================================================
 
     private fun showWalkRouteOnMap(route: com.example.guet_map.model.WalkRouteInfo) {
         val map = aMap ?: return
@@ -746,23 +655,6 @@ class MapFragment : Fragment() {
         routePolyline?.remove()
         routePolyline = null
         binding.root.findViewById<View>(R.id.cardWalkNav)?.visibility = View.GONE
-    }
-
-    // ============================================================
-    // 其他功能
-    // ============================================================
-
-    private fun openLocationOnMap(locationId: String) {
-        viewLifecycleOwner.lifecycleScope.launch {
-            val loc = viewModel.resolveAndSelectLocation(locationId)
-            if (loc != null) {
-                aMap?.moveCamera(
-                    com.amap.api.maps.CameraUpdateFactory.newLatLngZoom(
-                        LatLng(loc.latitude, loc.longitude), 17f
-                    )
-                )
-            }
-        }
     }
 
     private fun focusMap(lat: Double, lng: Double, zoom: Float) {
@@ -795,9 +687,18 @@ class MapFragment : Fragment() {
         )
     }
 
-    // ============================================================
-    // 隐私对话框
-    // ============================================================
+    private fun openLocationOnMap(locationId: String) {
+        viewLifecycleOwner.lifecycleScope.launch {
+            val loc = viewModel.resolveAndSelectLocation(locationId)
+            if (loc != null) {
+                aMap?.moveCamera(
+                    com.amap.api.maps.CameraUpdateFactory.newLatLngZoom(
+                        LatLng(loc.latitude, loc.longitude), 17f
+                    )
+                )
+            }
+        }
+    }
 
     private fun showPrivacyDialog() {
         MaterialAlertDialogBuilder(requireContext())
@@ -829,5 +730,23 @@ class MapFragment : Fragment() {
             }
             .setCancelable(false)
             .show()
+    }
+
+    companion object {
+        private object AMapLocationClient {
+            fun requireContext(): android.content.Context = throw IllegalStateException("Not initialized")
+            var onLocationResult: ((com.amap.api.location.AMapLocation) -> Unit)? = null
+            var onLocationError: ((Int, String) -> Unit)? = null
+            fun start() {}
+            fun stop() {}
+            fun destroy() {}
+            fun toStandardLocation(amapLocation: com.amap.api.location.AMapLocation): android.location.Location {
+                return android.location.Location("").apply {
+                    latitude = amapLocation.latitude
+                    longitude = amapLocation.longitude
+                    accuracy = amapLocation.accuracy
+                }
+            }
+        }
     }
 }

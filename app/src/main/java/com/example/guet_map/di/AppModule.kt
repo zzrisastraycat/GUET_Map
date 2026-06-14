@@ -2,6 +2,7 @@ package com.example.guet_map.di
 
 import android.app.Application
 import androidx.room.Room
+import com.example.guet_map.BuildConfig
 import com.example.guet_map.core.database.AppDatabase
 import com.example.guet_map.core.dao.LocationDao
 import com.example.guet_map.core.dao.GuideStepDao
@@ -24,7 +25,7 @@ import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import java.util.concurrent.TimeUnit
 import javax.inject.Singleton
-import com.example.guet_map.BuildConfig
+import com.example.guet_map.data.UserPrefs
 
 @Module
 @InstallIn(SingletonComponent::class)
@@ -120,7 +121,7 @@ object AppModule {
         apiService: ApiService,
         legacyFavoriteDao: LegacyFavoriteDao,
         legacyLocationDao: LegacyLocationDao,
-        userPrefs: com.example.guet_map.data.UserPrefs
+        userPrefs: UserPrefs
     ): LegacyFavoriteRepository = LegacyFavoriteRepository(apiService, legacyFavoriteDao, legacyLocationDao, userPrefs)
 
     // ========== Social 模块 DAOs ==========

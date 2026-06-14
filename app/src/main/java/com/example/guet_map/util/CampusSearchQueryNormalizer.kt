@@ -27,6 +27,7 @@ object CampusSearchQueryNormalizer {
             }
         }
 
+
         val teachingOnly = normalized == "教" ||
             (building != null && !normalized.contains("图书馆") && !normalized.contains("食堂"))
         return QueryContext(normalized, variants, building, teachingOnly)

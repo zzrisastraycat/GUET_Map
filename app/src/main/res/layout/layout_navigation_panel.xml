@@ -177,6 +177,20 @@
                 tools:text="沿主干道向东走200米" />
         </LinearLayout>
 
+        <TextView
+            android:id="@+id/tvLocalGuidePreview"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:padding="12dp"
+            android:background="@drawable/bg_current_location"
+            android:textColor="@color/text_secondary"
+            android:textSize="13sp"
+            android:lineSpacingMultiplier="1.25"
+            android:text="提交的路线步骤会显示在这里"
+            android:maxLines="4"
+            android:ellipsize="end" />
+
     </LinearLayout>
 
 </com.google.android.material.card.MaterialCardView>

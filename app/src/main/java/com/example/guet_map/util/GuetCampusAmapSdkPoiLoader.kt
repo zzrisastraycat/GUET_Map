@@ -41,6 +41,16 @@ class GuetCampusAmapSdkPoiLoader @Inject constructor(
             delay(120)
         }
 
+        for (keyword in CampusBuildingCatalog.amapTextKeywords()) {
+            loadKeywordPages(keyword, merged)
+            delay(100)
+        }
+
+        for (keyword in CampusDormitoryCatalog.amapKeywords()) {
+            loadKeywordPages(keyword, merged)
+            delay(100)
+        }
+
         for (aroundKw in listOf(
             "教学楼", "宿舍", "食堂", "图书馆", "校门", "学院", "体育馆", "咖啡", "超市"
         )) {

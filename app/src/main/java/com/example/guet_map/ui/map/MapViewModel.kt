@@ -48,7 +48,7 @@ class MapViewModel @Inject constructor(
 ) : ViewModel() {
 
     // ============================================================
-    // 新的统一状态管理
+    // 统一状态管理
     // ============================================================
 
     private val _uiState = MutableStateFlow<MapUiState>(MapUiState.Idle)
@@ -58,7 +58,7 @@ class MapViewModel @Inject constructor(
     val uiEvent = _uiEvent.asSharedFlow()
 
     // ============================================================
-    // 兼容旧代码的状态（逐步迁移）
+    // 兼容旧代码的状态
     // ============================================================
 
     private val _walkRoute = MutableStateFlow<WalkRouteInfo?>(null)
@@ -109,7 +109,6 @@ class MapViewModel @Inject constructor(
 
     // ── 地点数据 ─────────────────────────────────────────────
 
-    /** 缓存的地点列表 (Room → UI 实时同步) */
     val cachedLocations: StateFlow<List<Location>> = locationRepository
         .observeCachedLocations()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -117,7 +116,6 @@ class MapViewModel @Inject constructor(
     private val _locationsResource = MutableStateFlow<Resource<List<Location>>>(Resource.Loading)
     val locationsResource: StateFlow<Resource<List<Location>>> = _locationsResource.asStateFlow()
 
-    /** 当前筛选类别 (null = 全部) */
     private val _selectedCategory = MutableStateFlow<String?>(null)
     val selectedCategory: StateFlow<String?> = _selectedCategory.asStateFlow()
 
@@ -125,6 +123,9 @@ class MapViewModel @Inject constructor(
 
     private val _guideStepsResource = MutableStateFlow<Resource<List<GuideStep>>>(Resource.Loading)
     val guideStepsResource: StateFlow<Resource<List<GuideStep>>> = _guideStepsResource.asStateFlow()
+
+    private val _localGuideSteps = MutableStateFlow<List<GuideStep>>(emptyList())
+    val localGuideSteps: StateFlow<List<GuideStep>> = _localGuideSteps.asStateFlow()
 
     private val _selectedLocation = MutableStateFlow<Location?>(null)
     val selectedLocation: StateFlow<Location?> = _selectedLocation.asStateFlow()
@@ -148,7 +149,7 @@ class MapViewModel @Inject constructor(
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    // ── 新状态：位置详情 ──────────────────────────────────────
+    // ── 位置详情状态 ──────────────────────────────────────
 
     private val _locationDetailState = MutableStateFlow<LocationDetailState?>(null)
     val locationDetailState: StateFlow<LocationDetailState?> = _locationDetailState.asStateFlow()
@@ -162,35 +163,23 @@ class MapViewModel @Inject constructor(
     )
 
     // ============================================================
-    // 新状态：公开方法
+    // 公开方法
     // ============================================================
 
-    /**
-     * 更新 UI 状态
-     */
     private fun updateState(state: MapUiState) {
         _uiState.value = state
     }
 
-    /**
-     * 发送一次性事件
-     */
     private fun sendEvent(event: MapUiEvent) {
         viewModelScope.launch {
             _uiEvent.emit(event)
         }
     }
 
-    /**
-     * 显示错误状态
-     */
     fun showError(message: String, type: ErrorType = ErrorType.UNKNOWN) {
         updateState(MapUiState.Error(message, type))
     }
 
-    /**
-     * 清除错误状态
-     */
     fun clearError() {
         val currentState = _uiState.value
         if (currentState is MapUiState.Error) {
@@ -217,11 +206,16 @@ class MapViewModel @Inject constructor(
 
         updateState(MapUiState.SearchResult(q, searchResults.value))
 
-        val match = resolveSearchLocation(q) ?: return
-        pickFromSearch(match)
+        val exactMatch = resolveSearchLocation(q)
+        val bestVisibleMatch = CampusSearchMatcher.resolveBest(searchResults.value, q)
+        val firstVisibleMatch = searchResults.value.firstOrNull()
+        val match = exactMatch ?: bestVisibleMatch ?: firstVisibleMatch
+
+        if (match != null) {
+            pickFromSearch(match)
+        }
     }
 
-    /** 搜索选中：定位地图，展开详情卡，清空导航栏，并收起搜索栏 */
     fun pickFromSearch(location: Location) {
         val target = cachedLocations.value.find { it.locationId == location.locationId } ?: location
         _highlightedLocationId.value = target.locationId
@@ -250,10 +244,9 @@ class MapViewModel @Inject constructor(
     }
 
     // ============================================================
-    // 旧版兼容方法（保留，逐步迁移）
+    // 旧版兼容方法
     // ============================================================
 
-    /** 加载所有地点 */
     fun loadLocations() {
         viewModelScope.launch {
             updateState(MapUiState.Loading)
@@ -284,7 +277,6 @@ class MapViewModel @Inject constructor(
         }
     }
 
-    /** 按类别筛选 */
     fun filterByCategory(category: String?) {
         _selectedCategory.value = category
         viewModelScope.launch {
@@ -315,7 +307,6 @@ class MapViewModel @Inject constructor(
         }
     }
 
-    /** 加载指定地点的图文指引 */
     fun loadGuideSteps(locationId: String) {
         viewModelScope.launch {
             _locationDetailState.value = _locationDetailState.value?.copy(isGuideLoading = true)
@@ -343,7 +334,6 @@ class MapViewModel @Inject constructor(
         }
     }
 
-    /** 选择地点 → 加载指引并展开 BottomSheet */
     fun selectLocation(location: Location) {
         _selectedLocation.value = location
         val isFav = location.locationId in favoriteIds.value
@@ -353,6 +343,7 @@ class MapViewModel @Inject constructor(
             isFavorite = isFav
         )
 
+        observeLocalGuideSteps(location.locationId)
         if (location.hasGuide) {
             loadGuideSteps(location.locationId)
         }
@@ -362,13 +353,20 @@ class MapViewModel @Inject constructor(
         }
     }
 
+    private fun observeLocalGuideSteps(locationId: String) {
+        viewModelScope.launch {
+            guideRepository.observeCachedGuideSteps(locationId).collect { steps ->
+                _localGuideSteps.value = steps
+            }
+        }
+    }
+
     fun selectLocationById(locationId: String) {
         viewModelScope.launch {
             resolveAndSelectLocation(locationId)
         }
     }
 
-    /** 解析地点（内存 → Room → 必要时拉取列表），选中并返回；失败返回 null */
     suspend fun resolveAndSelectLocation(locationId: String): Location? {
         val resolved = resolveLocation(locationId)
         resolved?.let { selectLocation(it) }
@@ -437,7 +435,6 @@ class MapViewModel @Inject constructor(
         }
     }
 
-    /** 花江校区中心（无 GPS 时的默认起点） */
     fun campusCenterLatLng(): LatLng = LatLng(CampusGeo.CENTER_LAT, CampusGeo.CENTER_LNG)
 
     // ── Marker 管理 ──────────────────────────────────────────

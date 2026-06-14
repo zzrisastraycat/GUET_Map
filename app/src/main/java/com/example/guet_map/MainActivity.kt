@@ -39,6 +39,10 @@ class MainActivity : AppCompatActivity() {
             .findFragmentById(R.id.navHostFragment) as NavHostFragment
         val navController = navHostFragment.navController
 
+        // 防止资源合并或运行时重复注入导致底部导航菜单项超过 5 个而崩溃
+        while (binding.bottomNavigation.menu.size() > 5) {
+            binding.bottomNavigation.menu.removeItem(binding.bottomNavigation.menu.getItem(binding.bottomNavigation.menu.size() - 1).itemId)
+        }
         binding.bottomNavigation.setupWithNavController(navController)
 
         lifecycleScope.launch {
