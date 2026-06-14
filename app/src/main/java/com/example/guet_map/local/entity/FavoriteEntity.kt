@@ -3,11 +3,16 @@ package com.example.guet_map.local.entity
 import androidx.room.ColumnInfo
 import androidx.room.Entity
 
+/**
+ * 收藏实体（旧版兼容）
+ * 表名: legacy_favorites
+ * 主键: (user_id, location_id)
+ */
 @Entity(
-    tableName = "favorites",
+    tableName = "legacy_favorites",
     primaryKeys = ["user_id", "location_id"]
 )
-data class FavoriteEntity(
+data class LegacyFavoriteEntity(
     @ColumnInfo(name = "user_id")
     val userId: String,
     @ColumnInfo(name = "location_id")

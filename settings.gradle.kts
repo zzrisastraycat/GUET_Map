@@ -1,18 +1,20 @@
 pluginManagement {
     repositories {
-        // 国内镜像优先，避免 Gradle Plugin Portal 超时
-        maven { url = uri("https://maven.aliyun.com/repository/gradle-plugin") }
-        maven { url = uri("https://maven.aliyun.com/repository/google") }
-        maven { url = uri("https://maven.aliyun.com/repository/public") }
+        // 官方源优先
         google()
         mavenCentral()
         gradlePluginPortal()
+        // 国内镜像作为备用
+        maven { url = uri("https://maven.aliyun.com/repository/gradle-plugin") }
+        maven { url = uri("https://maven.aliyun.com/repository/google") }
+        maven { url = uri("https://maven.aliyun.com/repository/public") }
     }
 }
 
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
+        // 官方源优先
         google()
         mavenCentral()
 

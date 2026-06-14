@@ -1,7 +1,7 @@
 package com.example.guet_map.repository
 
-import com.example.guet_map.local.dao.GuideStepDao
-import com.example.guet_map.local.entity.GuideStepEntity
+import com.example.guet_map.core.dao.GuideStepDao
+import com.example.guet_map.core.entity.GuideStepEntity
 import com.example.guet_map.model.GuideStep
 import com.example.guet_map.model.Resource
 import com.example.guet_map.network.ApiService

@@ -1,4 +1,4 @@
-package com.example.guet_map.ui.map
+package com.example.guet_map.ui.map.component
 
 import android.view.LayoutInflater
 import android.view.ViewGroup

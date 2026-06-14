@@ -1,7 +1,7 @@
 package com.example.guet_map.repository
 
-import com.example.guet_map.local.dao.ContributeDraftDao
-import com.example.guet_map.local.entity.ContributeDraftEntity
+import com.example.guet_map.core.dao.ContributeDraftDao
+import com.example.guet_map.core.entity.ContributeDraftEntity
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import javax.inject.Inject

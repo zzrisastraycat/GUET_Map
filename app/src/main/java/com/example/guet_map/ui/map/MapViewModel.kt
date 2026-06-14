@@ -11,15 +11,18 @@ import com.example.guet_map.model.GuideStep
 import com.example.guet_map.model.Location
 import com.example.guet_map.model.Resource
 import com.example.guet_map.model.WalkRouteInfo
+import com.example.guet_map.repository.LegacyFavoriteRepository
+import com.example.guet_map.repository.GuideRepository
+import com.example.guet_map.repository.LocationRepository
+import com.example.guet_map.ui.map.state.ErrorType
+import com.example.guet_map.ui.map.state.MapUiEvent
+import com.example.guet_map.ui.map.state.MapUiState
 import com.example.guet_map.util.CampusGeo
 import com.example.guet_map.util.CampusLocationResolver
 import com.example.guet_map.util.CampusSearchMatcher
 import com.example.guet_map.util.CampusSearchQueryNormalizer
 import com.example.guet_map.util.CampusWalkRoutePlanner
 import com.example.guet_map.data.UserPrefs
-import com.example.guet_map.repository.FavoriteRepository
-import com.example.guet_map.repository.GuideRepository
-import com.example.guet_map.repository.LocationRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -29,7 +32,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -40,10 +42,24 @@ class MapViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val locationRepository: LocationRepository,
     private val guideRepository: GuideRepository,
-    private val favoriteRepository: FavoriteRepository,
+    private val favoriteRepository: LegacyFavoriteRepository,
     private val walkRoutePlanner: CampusWalkRoutePlanner,
     private val userPrefs: UserPrefs
 ) : ViewModel() {
+
+    // ============================================================
+    // 统一状态管理
+    // ============================================================
+
+    private val _uiState = MutableStateFlow<MapUiState>(MapUiState.Idle)
+    val uiState: StateFlow<MapUiState> = _uiState.asStateFlow()
+
+    private val _uiEvent = MutableSharedFlow<MapUiEvent>()
+    val uiEvent = _uiEvent.asSharedFlow()
+
+    // ============================================================
+    // 兼容旧代码的状态
+    // ============================================================
 
     private val _walkRoute = MutableStateFlow<WalkRouteInfo?>(null)
     val walkRoute: StateFlow<WalkRouteInfo?> = _walkRoute.asStateFlow()
@@ -93,7 +109,6 @@ class MapViewModel @Inject constructor(
 
     // ── 地点数据 ─────────────────────────────────────────────
 
-    /** 缓存的地点列表 (Room → UI 实时同步) */
     val cachedLocations: StateFlow<List<Location>> = locationRepository
         .observeCachedLocations()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -101,7 +116,6 @@ class MapViewModel @Inject constructor(
     private val _locationsResource = MutableStateFlow<Resource<List<Location>>>(Resource.Loading)
     val locationsResource: StateFlow<Resource<List<Location>>> = _locationsResource.asStateFlow()
 
-    /** 当前筛选类别 (null = 全部) */
     private val _selectedCategory = MutableStateFlow<String?>(null)
     val selectedCategory: StateFlow<String?> = _selectedCategory.asStateFlow()
 
@@ -135,6 +149,48 @@ class MapViewModel @Inject constructor(
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    // ── 位置详情状态 ──────────────────────────────────────
+
+    private val _locationDetailState = MutableStateFlow<LocationDetailState?>(null)
+    val locationDetailState: StateFlow<LocationDetailState?> = _locationDetailState.asStateFlow()
+
+    data class LocationDetailState(
+        val location: Location,
+        val isFavorite: Boolean,
+        val guideSteps: List<GuideStep> = emptyList(),
+        val isGuideLoading: Boolean = false,
+        val errorMessage: String? = null
+    )
+
+    // ============================================================
+    // 公开方法
+    // ============================================================
+
+    private fun updateState(state: MapUiState) {
+        _uiState.value = state
+    }
+
+    private fun sendEvent(event: MapUiEvent) {
+        viewModelScope.launch {
+            _uiEvent.emit(event)
+        }
+    }
+
+    fun showError(message: String, type: ErrorType = ErrorType.UNKNOWN) {
+        updateState(MapUiState.Error(message, type))
+    }
+
+    fun clearError() {
+        val currentState = _uiState.value
+        if (currentState is MapUiState.Error) {
+            updateState(MapUiState.Idle)
+        }
+    }
+
+    // ============================================================
+    // 搜索相关
+    // ============================================================
+
     fun setSearchQuery(query: String) {
         _searchQuery.value = query
     }
@@ -148,6 +204,8 @@ class MapViewModel @Inject constructor(
         if (q.isEmpty()) return
         _searchQuery.value = q
 
+        updateState(MapUiState.SearchResult(q, searchResults.value))
+
         val exactMatch = resolveSearchLocation(q)
         val bestVisibleMatch = CampusSearchMatcher.resolveBest(searchResults.value, q)
         val firstVisibleMatch = searchResults.value.firstOrNull()
@@ -158,15 +216,14 @@ class MapViewModel @Inject constructor(
         }
     }
 
-    /** 搜索选中：定位地图，展开详情卡，清空导航栏，并收起搜索栏 */
     fun pickFromSearch(location: Location) {
         val target = cachedLocations.value.find { it.locationId == location.locationId } ?: location
         _highlightedLocationId.value = target.locationId
         selectLocation(target)
         clearWalkRoute()
         viewModelScope.launch {
-            _events.emit(MapEvent.FocusLocation(target))
-            _events.emit(MapEvent.DismissSearchUi)
+            _uiEvent.emit(MapUiEvent.FocusMap(target.latitude, target.longitude))
+            _uiEvent.emit(MapUiEvent.DismissSearchInput)
         }
     }
 
@@ -178,7 +235,7 @@ class MapViewModel @Inject constructor(
         _highlightedLocationId.value = target.locationId
         selectLocation(target)
         viewModelScope.launch {
-            _events.emit(MapEvent.FocusLocation(target))
+            _uiEvent.emit(MapUiEvent.FocusMap(target.latitude, target.longitude))
         }
     }
 
@@ -186,26 +243,40 @@ class MapViewModel @Inject constructor(
         addMarkersForLocations(cachedLocations.value)
     }
 
-    // ── 事件 ─────────────────────────────────────────────────
+    // ============================================================
+    // 旧版兼容方法
+    // ============================================================
 
-    private val _events = MutableSharedFlow<MapEvent>()
-    val events = _events.asSharedFlow()
-
-    // ── 数据加载 ─────────────────────────────────────────────
-
-    /** 加载所有地点 */
     fun loadLocations() {
         viewModelScope.launch {
+            updateState(MapUiState.Loading)
             locationRepository.getLocations().collect { resource ->
                 _locationsResource.value = resource
-                if (resource is Resource.Success) {
-                    addMarkersForLocations(resource.data)
+                when (resource) {
+                    is Resource.Loading -> updateState(MapUiState.Loading)
+                    is Resource.Success -> {
+                        updateState(
+                            MapUiState.LocationsLoaded(
+                                locations = resource.data,
+                                filteredLocations = resource.data,
+                                selectedCategory = _selectedCategory.value
+                            )
+                        )
+                        addMarkersForLocations(resource.data)
+                    }
+                    is Resource.Error -> {
+                        updateState(
+                            MapUiState.Error(
+                                message = resource.message,
+                                type = ErrorType.LOAD_DATA_FAILED
+                            )
+                        )
+                    }
                 }
             }
         }
     }
 
-    /** 按类别筛选 */
     fun filterByCategory(category: String?) {
         _selectedCategory.value = category
         viewModelScope.launch {
@@ -213,7 +284,21 @@ class MapViewModel @Inject constructor(
                 locationRepository.getLocationsByCategory(category).collect { resource ->
                     _locationsResource.value = resource
                     if (resource is Resource.Success) {
+                        updateState(
+                            MapUiState.LocationsLoaded(
+                                locations = cachedLocations.value,
+                                filteredLocations = resource.data,
+                                selectedCategory = category
+                            )
+                        )
                         addMarkersForLocations(resource.data)
+                    } else if (resource is Resource.Error) {
+                        updateState(
+                            MapUiState.Error(
+                                message = resource.message,
+                                type = ErrorType.LOAD_DATA_FAILED
+                            )
+                        )
                     }
                 }
             } else {
@@ -222,26 +307,49 @@ class MapViewModel @Inject constructor(
         }
     }
 
-    /** 加载指定地点的图文指引 */
     fun loadGuideSteps(locationId: String) {
         viewModelScope.launch {
+            _locationDetailState.value = _locationDetailState.value?.copy(isGuideLoading = true)
             guideRepository.getGuideSteps(locationId).collect { resource ->
-                _guideStepsResource.value = resource
+                when (resource) {
+                    is Resource.Loading -> {
+                        _locationDetailState.value = _locationDetailState.value?.copy(isGuideLoading = true)
+                    }
+                    is Resource.Success -> {
+                        _locationDetailState.value = _locationDetailState.value?.copy(
+                            guideSteps = resource.data,
+                            isGuideLoading = false
+                        )
+                        _guideStepsResource.value = resource
+                    }
+                    is Resource.Error -> {
+                        _locationDetailState.value = _locationDetailState.value?.copy(
+                            isGuideLoading = false,
+                            errorMessage = resource.message
+                        )
+                        _guideStepsResource.value = resource
+                    }
+                }
             }
         }
     }
 
-    /** 选择地点 → 加载指引并展开 BottomSheet */
     fun selectLocation(location: Location) {
         _selectedLocation.value = location
+        val isFav = location.locationId in favoriteIds.value
+
+        _locationDetailState.value = LocationDetailState(
+            location = location,
+            isFavorite = isFav
+        )
+
         observeLocalGuideSteps(location.locationId)
         if (location.hasGuide) {
             loadGuideSteps(location.locationId)
-        } else {
-            _guideStepsResource.value = Resource.Success(emptyList())
         }
+
         viewModelScope.launch {
-            _events.emit(MapEvent.ShowBottomSheet(location))
+            _uiEvent.emit(MapUiEvent.ShowLocationSheet(location.locationId))
         }
     }
 
@@ -259,37 +367,9 @@ class MapViewModel @Inject constructor(
         }
     }
 
-    /** 解析地点（内存 → Room → 必要时拉取列表），选中并返回；失败返回 null */
     suspend fun resolveAndSelectLocation(locationId: String): Location? {
         val resolved = resolveLocation(locationId)
-        // #region agent log
-        com.example.guet_map.util.AgentDebugLog.log(
-            "H4",
-            "MapViewModel.resolveAndSelectLocation",
-            if (resolved != null) "resolved" else "resolve failed",
-            mapOf(
-                "locationId" to locationId,
-                "cacheSize" to cachedLocations.value.size,
-                "resolved" to (resolved != null)
-            ),
-            runId = "post-fix"
-        )
-        // #endregion
         resolved?.let { selectLocation(it) }
-        // #region agent log
-        com.example.guet_map.util.AgentDebugLog.log(
-            "G2",
-            "MapViewModel.resolveAndSelectLocation",
-            "coords",
-            mapOf(
-                "locationId" to locationId,
-                "name" to (resolved?.name ?: ""),
-                "lat" to (resolved?.latitude ?: 0.0),
-                "lng" to (resolved?.longitude ?: 0.0)
-            ),
-            runId = "geo-fix"
-        )
-        // #endregion
         return resolved
     }
 
@@ -311,6 +391,12 @@ class MapViewModel @Inject constructor(
         val dest = cachedLocations.value.find { it.locationId == destination.locationId }
             ?: destination
         _routeLoading.value = true
+        updateState(
+            MapUiState.Navigating(
+                target = dest,
+                isLoading = true
+            )
+        )
         walkRoutePlanner.planWalkRoute(
             start = start,
             end = LatLng(dest.latitude, dest.longitude),
@@ -318,19 +404,37 @@ class MapViewModel @Inject constructor(
             onSuccess = { route ->
                 _walkRoute.value = route
                 _routeLoading.value = false
+                updateState(
+                    MapUiState.Navigating(
+                        target = dest,
+                        route = route,
+                        isLoading = false
+                    )
+                )
             },
             onError = { message ->
                 _routeLoading.value = false
-                viewModelScope.launch { _routeError.emit(message) }
+                updateState(
+                    MapUiState.Navigating(
+                        target = dest,
+                        isLoading = false,
+                        errorMessage = message
+                    )
+                )
+                viewModelScope.launch {
+                    _uiEvent.emit(MapUiEvent.ShowToast(message))
+                }
             }
         )
     }
 
     fun clearWalkRoute() {
         _walkRoute.value = null
+        if (_uiState.value is MapUiState.Navigating) {
+            updateState(MapUiState.Idle)
+        }
     }
 
-    /** 花江校区中心（无 GPS 时的默认起点） */
     fun campusCenterLatLng(): LatLng = LatLng(CampusGeo.CENTER_LAT, CampusGeo.CENTER_LNG)
 
     // ── Marker 管理 ──────────────────────────────────────────
@@ -382,12 +486,4 @@ class MapViewModel @Inject constructor(
         super.onCleared()
         aMap = null
     }
-}
-
-/** 地图相关的一次性事件 */
-sealed class MapEvent {
-    data class ShowBottomSheet(val location: Location) : MapEvent()
-    data class FocusLocation(val location: Location) : MapEvent()
-    data object HideBottomSheet : MapEvent()
-    data object DismissSearchUi : MapEvent()
 }

@@ -3,7 +3,7 @@ package com.example.guet_map.ui.favorites
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.guet_map.model.Location
-import com.example.guet_map.repository.FavoriteRepository
+import com.example.guet_map.repository.LegacyFavoriteRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -13,7 +13,7 @@ import javax.inject.Inject
 
 @HiltViewModel
 class FavoritesViewModel @Inject constructor(
-    private val favoriteRepository: FavoriteRepository
+    private val favoriteRepository: LegacyFavoriteRepository
 ) : ViewModel() {
 
     val favorites: StateFlow<List<Location>> = favoriteRepository

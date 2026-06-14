@@ -4,9 +4,12 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
-import com.example.guet_map.local.entity.LocationEntity
+import com.example.guet_map.core.entity.LocationEntity
 import kotlinx.coroutines.flow.Flow
 
+/**
+ * 地点 DAO（旧版兼容）
+ */
 @Dao
 interface LocationDao {
 

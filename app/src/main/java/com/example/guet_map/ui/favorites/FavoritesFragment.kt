@@ -49,15 +49,15 @@ class FavoritesFragment : Fragment(R.layout.fragment_favorites) {
                     .show()
             }
         )
-        binding.rvFavorites.layoutManager = LinearLayoutManager(requireContext())
-        binding.rvFavorites.adapter = adapter
+        binding.recyclerViewFavorites.layoutManager = LinearLayoutManager(requireContext())
+        binding.recyclerViewFavorites.adapter = adapter
 
         viewLifecycleOwner.lifecycleScope.launch {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
                 viewModel.favorites.collectLatest { list ->
                     adapter.submitList(list)
-                    binding.tvFavoritesEmpty.isVisible = list.isEmpty()
-                    binding.rvFavorites.isVisible = list.isNotEmpty()
+                    binding.textViewEmpty.isVisible = list.isEmpty()
+                    binding.recyclerViewFavorites.isVisible = list.isNotEmpty()
                 }
             }
         }

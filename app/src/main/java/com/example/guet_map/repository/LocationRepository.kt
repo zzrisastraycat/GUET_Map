@@ -1,8 +1,8 @@
 package com.example.guet_map.repository
 
 import com.example.guet_map.BuildConfig
-import com.example.guet_map.local.dao.LocationDao
-import com.example.guet_map.local.entity.LocationEntity
+import com.example.guet_map.core.dao.LocationDao
+import com.example.guet_map.core.entity.LocationEntity
 import com.example.guet_map.model.Location
 import com.example.guet_map.model.Resource
 import com.example.guet_map.network.ApiService
