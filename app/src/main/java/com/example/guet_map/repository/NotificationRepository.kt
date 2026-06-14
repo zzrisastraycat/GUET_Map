@@ -1,7 +1,7 @@
 package com.example.guet_map.repository
 
-import com.example.guet_map.local.dao.NotificationDao
-import com.example.guet_map.local.entity.NotificationEntity
+import com.example.guet_map.core.dao.NotificationDao
+import com.example.guet_map.core.entity.NotificationEntity
 import com.example.guet_map.model.AppNotification
 import com.example.guet_map.network.ApiService
 import kotlinx.coroutines.flow.Flow

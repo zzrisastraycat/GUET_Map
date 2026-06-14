@@ -1,12 +1,15 @@
 package com.example.guet_map.di
 
-import com.example.guet_map.BuildConfig
-import com.example.guet_map.local.AppDatabase
-import com.example.guet_map.local.dao.ContributeDraftDao
-import com.example.guet_map.local.dao.FavoriteDao
-import com.example.guet_map.local.dao.GuideStepDao
-import com.example.guet_map.local.dao.LocationDao
-import com.example.guet_map.local.dao.NotificationDao
+import android.app.Application
+import androidx.room.Room
+import com.example.guet_map.core.database.AppDatabase
+import com.example.guet_map.core.dao.LocationDao
+import com.example.guet_map.core.dao.GuideStepDao
+import com.example.guet_map.core.dao.NotificationDao
+import com.example.guet_map.core.dao.ContributeDraftDao
+import com.example.guet_map.local.dao.LegacyFavoriteDao
+import com.example.guet_map.local.dao.LegacyLocationDao
+import com.example.guet_map.repository.LegacyFavoriteRepository
 import com.example.guet_map.network.ApiService
 import com.example.guet_map.network.AuthInterceptor
 import com.example.guet_map.network.MockInterceptor
@@ -21,6 +24,7 @@ import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import java.util.concurrent.TimeUnit
 import javax.inject.Singleton
+import com.example.guet_map.BuildConfig
 
 @Module
 @InstallIn(SingletonComponent::class)
@@ -66,23 +70,66 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideDatabase(application: android.app.Application): AppDatabase {
-        return AppDatabase.getInstance(application)
+    fun provideDatabase(application: Application): AppDatabase {
+        return Room.databaseBuilder(
+            application,
+            AppDatabase::class.java,
+            "guet_map.db"
+        )
+            .fallbackToDestructiveMigration()
+            .build()
     }
+
+    // ========== Core DAOs ==========
+    @Provides
+    fun provideLocationDao(database: AppDatabase): LocationDao = database.locationDao()
 
     @Provides
     fun provideGuideStepDao(database: AppDatabase): GuideStepDao = database.guideStepDao()
 
     @Provides
-    fun provideLocationDao(database: AppDatabase): LocationDao = database.locationDao()
-
-    @Provides
-    fun provideFavoriteDao(database: AppDatabase): FavoriteDao = database.favoriteDao()
-
-    @Provides
     fun provideNotificationDao(database: AppDatabase): NotificationDao = database.notificationDao()
 
     @Provides
-    fun provideContributeDraftDao(database: AppDatabase): ContributeDraftDao =
-        database.contributeDraftDao()
+    fun provideContributeDraftDao(database: AppDatabase): ContributeDraftDao = database.contributeDraftDao()
+
+    // ========== AI 模块 DAOs ==========
+    @Provides
+    fun provideChatMessageDao(database: AppDatabase) = database.chatMessageDao()
+
+    @Provides
+    fun provideReviewDao(database: AppDatabase) = database.reviewDao()
+
+    // ========== Location 模块 DAOs ==========
+    @Provides
+    fun provideAnnouncementDao(database: AppDatabase) = database.announcementDao()
+
+    @Provides
+    fun provideOfflineMapDao(database: AppDatabase) = database.offlineMapDao()
+
+    // ========== Legacy DAOs (for old code compatibility) ==========
+    @Provides
+    fun provideLegacyFavoriteDao(database: AppDatabase): LegacyFavoriteDao = database.legacyFavoriteDao()
+
+    @Provides
+    fun provideLegacyLocationDao(database: AppDatabase): LegacyLocationDao = database.legacyLocationDao()
+
+    @Provides
+    @Singleton
+    fun provideLegacyFavoriteRepository(
+        apiService: ApiService,
+        legacyFavoriteDao: LegacyFavoriteDao,
+        legacyLocationDao: LegacyLocationDao,
+        userPrefs: com.example.guet_map.data.UserPrefs
+    ): LegacyFavoriteRepository = LegacyFavoriteRepository(apiService, legacyFavoriteDao, legacyLocationDao, userPrefs)
+
+    // ========== Social 模块 DAOs ==========
+    @Provides
+    fun provideWeatherDao(database: AppDatabase) = database.weatherDao()
+
+    @Provides
+    fun provideFavoriteDao(database: AppDatabase) = database.favoriteDao()
+
+    @Provides
+    fun providePhotoDao(database: AppDatabase) = database.photoDao()
 }

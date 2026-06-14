@@ -257,8 +257,13 @@ class ContributeFragment : Fragment(R.layout.fragment_contribute) {
                 // 步骤表单更新
                 launch {
                     viewModel.stepItems.collectLatest { steps ->
-                        stepAdapter.submitList(steps)
-                        binding.tvStepCount.text = "共 ${steps.size} 步"
+                        // 延迟到主线程空闲时更新，避免 RecyclerView 布局冲突
+                        binding.rvStepForms.post {
+                            if (_binding != null) {
+                                stepAdapter.submitList(steps)
+                                binding.tvStepCount.text = "共 ${steps.size} 步"
+                            }
+                        }
                     }
                 }
 

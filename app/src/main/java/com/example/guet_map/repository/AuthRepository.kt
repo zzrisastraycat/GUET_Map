@@ -14,7 +14,7 @@ import javax.inject.Singleton
 class AuthRepository @Inject constructor(
     private val apiService: ApiService,
     private val userPrefs: UserPrefs,
-    private val favoriteRepository: FavoriteRepository
+    private val favoriteRepository: LegacyFavoriteRepository
 ) {
 
     fun login(username: String, password: String): Flow<Resource<LoginResponse>> = flow {

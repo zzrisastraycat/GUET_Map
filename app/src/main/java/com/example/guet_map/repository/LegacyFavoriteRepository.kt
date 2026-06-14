@@ -1,26 +1,29 @@
 package com.example.guet_map.repository
 
 import com.example.guet_map.data.UserPrefs
-import com.example.guet_map.local.dao.FavoriteDao
-import com.example.guet_map.local.dao.LocationDao
-import com.example.guet_map.local.entity.FavoriteEntity
+import com.example.guet_map.local.dao.LegacyFavoriteDao
+import com.example.guet_map.local.dao.LegacyLocationDao
+import com.example.guet_map.local.entity.LegacyFavoriteEntity
 import com.example.guet_map.model.FavoriteRequest
 import com.example.guet_map.model.Location
 import com.example.guet_map.network.ApiService
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
 
+/**
+ * 旧版收藏仓库（兼容）
+ * 使用 legacy_favorites 和 legacy_locations 表
+ */
 @Singleton
-class FavoriteRepository @Inject constructor(
+class LegacyFavoriteRepository @Inject constructor(
     private val apiService: ApiService,
-    private val favoriteDao: FavoriteDao,
-    private val locationDao: LocationDao,
+    private val legacyFavoriteDao: LegacyFavoriteDao,
+    private val legacyLocationDao: LegacyLocationDao,
     private val userPrefs: UserPrefs
 ) {
     private val activeUserId = MutableStateFlow(currentUserId())
@@ -38,14 +41,14 @@ class FavoriteRepository @Inject constructor(
 
     fun observeFavoriteIds(): Flow<Set<String>> =
         activeUserId.flatMapLatest { uid ->
-            favoriteDao.observeFavoriteIds(uid).map { it.toSet() }
+            legacyFavoriteDao.observeFavoriteIds(uid).map { it.toSet() }
         }
 
     fun observeFavoriteLocations(): Flow<List<Location>> =
         activeUserId.flatMapLatest { uid ->
             combine(
-                favoriteDao.observeAll(uid),
-                locationDao.getAllLocations()
+                legacyFavoriteDao.observeAll(uid),
+                legacyLocationDao.getAllLocations()
             ) { favorites, locations ->
                 val byId = locations.associateBy { it.locationId }
                 favorites.mapNotNull { fav ->
@@ -67,11 +70,11 @@ class FavoriteRepository @Inject constructor(
         }
 
     suspend fun isFavorite(locationId: String): Boolean =
-        favoriteDao.isFavorite(activeUserId.value, locationId) > 0
+        legacyFavoriteDao.isFavorite(activeUserId.value, locationId) > 0
 
     suspend fun toggleFavorite(location: Location): Boolean {
         val uid = activeUserId.value
-        val currentlyFavorite = favoriteDao.isFavorite(uid, location.locationId) > 0
+        val currentlyFavorite = legacyFavoriteDao.isFavorite(uid, location.locationId) > 0
         return if (currentlyFavorite) {
             removeFavorite(location.locationId)
             false
@@ -87,7 +90,7 @@ class FavoriteRepository @Inject constructor(
             apiService.addFavorite(FavoriteRequest(location.locationId))
         } catch (_: Exception) {
         }
-        favoriteDao.insert(FavoriteEntity(userId = uid, locationId = location.locationId))
+        legacyFavoriteDao.insert(LegacyFavoriteEntity(userId = uid, locationId = location.locationId))
     }
 
     suspend fun removeFavorite(locationId: String) {
@@ -96,7 +99,7 @@ class FavoriteRepository @Inject constructor(
             apiService.removeFavorite(locationId)
         } catch (_: Exception) {
         }
-        favoriteDao.delete(uid, locationId)
+        legacyFavoriteDao.delete(uid, locationId)
     }
 
     suspend fun syncFromServer() {
@@ -104,17 +107,17 @@ class FavoriteRepository @Inject constructor(
         if (uid == UserPrefs.GUEST_USER_ID) return
         try {
             val remote = apiService.getFavorites()
-            favoriteDao.deleteAllForUser(uid)
+            legacyFavoriteDao.deleteAllForUser(uid)
             remote.forEach { loc ->
-                favoriteDao.insert(FavoriteEntity(userId = uid, locationId = loc.locationId))
-                locationDao.insertAll(listOf(loc.toEntity()))
+                legacyFavoriteDao.insert(LegacyFavoriteEntity(userId = uid, locationId = loc.locationId))
+                legacyLocationDao.insertAll(listOf(loc.toEntity()))
             }
         } catch (_: Exception) {
         }
     }
 
     suspend fun enrichFavoriteFromCache(locationId: String): Location? =
-        locationDao.getLocationById(locationId)?.let { entity ->
+        legacyLocationDao.getLocationById(locationId)?.let { entity ->
             Location(
                 locationId = entity.locationId,
                 name = entity.name,
@@ -128,7 +131,7 @@ class FavoriteRepository @Inject constructor(
             )
         }
 
-    private fun Location.toEntity() = com.example.guet_map.local.entity.LocationEntity(
+    private fun com.example.guet_map.model.Location.toEntity() = com.example.guet_map.local.entity.LegacyLocationEntity(
         locationId = locationId,
         name = name,
         latitude = latitude,

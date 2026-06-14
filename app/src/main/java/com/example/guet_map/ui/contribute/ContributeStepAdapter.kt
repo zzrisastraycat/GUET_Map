@@ -3,6 +3,8 @@ package com.example.guet_map.ui.contribute
 import android.net.Uri
 import android.view.LayoutInflater
 import android.view.ViewGroup
+import androidx.recyclerview.widget.DiffUtil
+import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import coil.load
 import coil.transform.RoundedCornersTransformation
@@ -20,15 +22,7 @@ class ContributeStepAdapter(
     private val onPhotoClick: (String) -> Unit,
     private val onDescriptionChanged: (String, String) -> Unit,
     private val onDeleteClick: (String) -> Unit
-) : RecyclerView.Adapter<ContributeStepAdapter.ViewHolder>() {
-
-    private val items = mutableListOf<StepFormItem>()
-
-    fun submitList(list: List<StepFormItem>) {
-        items.clear()
-        items.addAll(list)
-        notifyDataSetChanged()
-    }
+) : ListAdapter<StepFormItem, ContributeStepAdapter.ViewHolder>(StepFormDiffCallback()) {
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
         val binding = ItemStepFormBinding.inflate(
@@ -38,10 +32,8 @@ class ContributeStepAdapter(
     }
 
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
-        holder.bind(items[position])
+        holder.bind(getItem(position))
     }
-
-    override fun getItemCount(): Int = items.size
 
     inner class ViewHolder(
         private val binding: ItemStepFormBinding
@@ -64,8 +56,11 @@ class ContributeStepAdapter(
                 binding.ivCameraIcon.visibility = android.view.View.VISIBLE
             }
 
-            // Description
-            binding.etDescription.setText(item.description)
+            // Description - only update if different to avoid cursor issues
+            val currentText = binding.etDescription.text.toString()
+            if (currentText != item.description) {
+                binding.etDescription.setText(item.description)
+            }
 
             // Listeners — remove old ones to avoid duplicate triggers
             binding.etDescription.setOnFocusChangeListener(null)
@@ -84,5 +79,15 @@ class ContributeStepAdapter(
                 onDeleteClick(item.id)
             }
         }
+    }
+}
+
+class StepFormDiffCallback : DiffUtil.ItemCallback<StepFormItem>() {
+    override fun areItemsTheSame(oldItem: StepFormItem, newItem: StepFormItem): Boolean {
+        return oldItem.id == newItem.id
+    }
+
+    override fun areContentsTheSame(oldItem: StepFormItem, newItem: StepFormItem): Boolean {
+        return oldItem == newItem
     }
 }
